@@ -4,35 +4,56 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"scratch/datastructures/funnel/flow"
+	"scratch/datastructures/funnel/svg"
+	"sort"
 	"time"
 )
 
-// Start function.
-func fn1(in ...interface{}) {
-	w := in[0].(weaver)
-	fmt.Println("time grid:", w.current)
-	for i, r := range w.r {
-		if r.current.Before(w.next.Time) {
-			fmt.Println("receiver:", i, r.current)
+const year = 365
+
+func startSVG() flow.WeaverFunc {
+	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+		d := w.Data.(data)
+		fmt.Println(d.inside)
+		d.Image = d.Image.ViewBox(os.Stdout, 0, 0, 100, 100)
+		w.Data = d
+		return w
+	}
+}
+
+func writeDasa() flow.WeaverFunc {
+	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+		fmt.Println("time grid:", e.Time)
+		for _, e := range w.Output {
+			fmt.Println("reciever:", e)
 		}
+		return w
 	}
 }
 
-// Pre event.
-func fn2(in ...interface{}) {
-}
-
-// Event function.
-func fn3(in ...interface{}) {
-	ev := in[0].(event)
-	if !ev.valid {
-		return
+func writeEvent() flow.WeaverFunc {
+	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+		if !e.Valid {
+			return w
+		}
+		fmt.Println("event:", e.Time)
+		return w
 	}
-	fmt.Println("event:", ev.Time)
 }
 
-// Post algorithem.
-func fn4(in ...interface{}) {
+func closeSVG() flow.WeaverFunc {
+	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+		svg := w.Data.(data)
+		svg.End()
+		return w
+	}
+}
+
+type data struct {
+	inside string
+	svg.Image
 }
 
 func main() {
@@ -43,16 +64,91 @@ func main() {
 	}
 	d1 := time.Date(2000, 1, 1, 0, 0, 0, 0, loc)
 	d2 := time.Date(2021, 1, 1, 0, 0, 0, 0, loc)
-	chans := make([]chan event, 4)
+	chans := make([]chan flow.Event, 4)
 	for i := range chans {
-		chans[i] = make(chan event)
+		chans[i] = make(chan flow.Event)
 	}
-	go flow(d1, d2, chans[0])
-	go flow1(d1, d2, chans[1])
-	go flow2(d1, d2, chans[2])
-	go flow3(d1, d2, chans[3])
+	go goFlow(d1, d2, chans[0])
+	go goFlow1(d1, d2, chans[1])
+	go goFlow2(d1, d2, chans[2])
+	go goFlow3(d1, d2, chans[3])
 
-	ev := generateEvents(5, d1, d2)
+	ev := generateEvents(10, d1, d2)
 
-	Weave(ev, d1, d2, chans[0], chans[1], chans[2], chans[3])
+	w := flow.Weaver{
+		Start:     d1,
+		End:       d2,
+		PreFunc:   startSVG(),
+		PreEvent:  writeDasa(),
+		Event:     writeEvent(),
+		PostEvent: nil,
+		PostFunc:  closeSVG(),
+	}
+
+	d := data{
+		inside: "Hello World",
+	}
+	w = w.Load(d)
+
+	w.Date(ev, chans[0], chans[1], chans[2], chans[3])
+}
+
+func goFlow(start, end time.Time, ch chan flow.Event) {
+	for start.Before(end) {
+		start = start.Add(time.Duration(24*year) * time.Hour)
+		ev := flow.Event{Time: start, Valid: true}
+		ch <- ev
+	}
+	close(ch)
+}
+
+func goFlow1(start, end time.Time, ch chan flow.Event) {
+	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
+	for start.Before(end) {
+		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
+		ev := flow.Event{Time: start, Valid: true}
+		ch <- ev
+	}
+	close(ch)
+}
+
+func goFlow2(start, end time.Time, ch chan flow.Event) {
+	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
+	for start.Before(end) {
+		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
+		ev := flow.Event{Time: start, Valid: true}
+		ch <- ev
+	}
+	close(ch)
+}
+
+func goFlow3(start, end time.Time, ch chan flow.Event) {
+	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
+	for start.Before(end) {
+		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
+		ev := flow.Event{Time: start, Valid: true}
+		ch <- ev
+	}
+	close(ch)
+}
+
+func generateEvents(num int, start, end time.Time) flow.Events {
+
+	ev := make(flow.Events, num)
+	s := start.Unix()
+	e := end.Unix()
+	rng := e - s
+
+	for i := range ev {
+		rnd := rand.Int63()%rng + 1
+		date := time.Unix(s+rnd, 0)
+		ev[i].Time = date
+		ev[i].Valid = true
+	}
+
+	if num > 1 {
+		sort.Sort(flow.Events(ev))
+	}
+
+	return ev
 }
