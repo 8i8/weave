@@ -1,4 +1,4 @@
-package flow
+package weave
 
 import (
 	"fmt"
@@ -12,17 +12,17 @@ const (
 
 // WeaverFunc are the functions run by the weaver to generate its output,
 // facilitaing the use of closures when calling the functions.
-type WeaverFunc func(Weaver, Event) Weaver
+type WeaverFunc func(Weaver, Stitch) Weaver
 
 // Weaver interleave multiple streams of dates.
 type Weaver struct {
 	Start     time.Time
 	End       time.Time
 	Data      interface{}
-	current   Event
-	next      Event
+	current   Stitch
+	next      Stitch
 	receiver  []receiver
-	Output    Events
+	Output    Stiches
 	PreFunc   WeaverFunc
 	PreEvent  WeaverFunc
 	Event     WeaverFunc
@@ -32,15 +32,15 @@ type Weaver struct {
 }
 
 type receiver struct {
-	ch      chan Event
-	prev    Event
-	current Event
-	next    Event
+	ch      chan Stitch
+	prev    Stitch
+	current Stitch
+	next    Stitch
 }
 
 // Date builds and runs a weaver, the first chanel that is provided is used as
 // a grid or ruler for structuring of all of the folling channel.
-func (w Weaver) Date(ev Events, chans ...chan Event) {
+func (w Weaver) Date(ev Stiches, chans ...chan Stitch) {
 	//w.debug= biTload | biTevent,
 	w.receiver = make([]receiver, len(chans))
 	for i := range chans {
@@ -64,7 +64,7 @@ func (w Weaver) loadReceivers() Weaver {
 			continue
 		}
 		// Remove all yantra in between required dates.
-		for w.receiver[i].next.Before(w.Start) && w.receiver[i].next.Valid {
+		for w.receiver[i].next.Time.Before(w.Start) && w.receiver[i].next.Valid {
 			w.receiver[i].prev = w.receiver[i].current
 			w.receiver[i].current = w.receiver[i].next
 			w.receiver[i].next = <-w.receiver[i].ch
@@ -92,7 +92,7 @@ func (w Weaver) updateReceivers() Weaver {
 		if !w.receiver[i].current.Valid {
 			continue
 		}
-		for w.receiver[i].next.Before(w.next.Time) || w.receiver[i].next.Equal(w.next.Time) {
+		for w.receiver[i].next.Time.Before(w.next.Time) || w.receiver[i].next.Time.Equal(w.next.Time) {
 			w.receiver[i].prev = w.receiver[i].current
 			w.receiver[i].current = w.receiver[i].next
 			w.receiver[i].next = <-w.receiver[i].ch
@@ -108,7 +108,7 @@ func (w Weaver) loadCalendar() Weaver {
 	for {
 		w.current = w.next // Set up lookahead.
 		w.next = <-w.receiver[0].ch
-		if w.next.After(w.Start) {
+		if w.next.Time.After(w.Start) {
 			break
 		}
 	}
@@ -117,7 +117,7 @@ func (w Weaver) loadCalendar() Weaver {
 	return w
 }
 
-func (w Weaver) weavedate(ev Events) error {
+func (w Weaver) weavedate(ev Stiches) error {
 	// Load all required data from chans.
 	j := ev.advanceTo(w.Start)
 	if w.debug&biTevent > 0 {
@@ -125,7 +125,7 @@ func (w Weaver) weavedate(ev Events) error {
 	}
 	w = w.loadReceivers()
 	w = w.loadCalendar()
-	if w.next.Equal(time.Time{}) {
+	if w.next.Time.Equal(time.Time{}) {
 		return fmt.Errorf("weave: date: inValid")
 	}
 	// Extract calendar.
@@ -139,7 +139,7 @@ func (w Weaver) weavedate(ev Events) error {
 		w = w.updateReceivers()
 		w.Output = w.Output[:0]
 		for _, r := range w.receiver {
-			if r.current.Before(w.next.Time) {
+			if r.current.Time.Before(w.next.Time) {
 				w.Output = append(w.Output, r.current)
 			}
 		}
@@ -150,7 +150,7 @@ func (w Weaver) weavedate(ev Events) error {
 		// Events.
 		for ; j < len(ev) && ev[j].Time.Before(w.next.Time); j++ {
 			// Omit Events that are too recent.
-			if ev[j].After(w.End) {
+			if ev[j].Time.After(w.End) {
 				break
 			}
 			// Output function.
@@ -163,7 +163,7 @@ func (w Weaver) weavedate(ev Events) error {
 			w = w.PostEvent(w, w.current)
 		}
 		// Check out when required.
-		if w.next.After(w.End) {
+		if w.next.Time.After(w.End) {
 			break
 		}
 		// Prepare for the next row.

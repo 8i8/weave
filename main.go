@@ -5,16 +5,16 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"scratch/datastructures/funnel/flow"
-	"scratch/datastructures/funnel/svg"
+	"scratch/datastructures/weave/svg"
+	"scratch/datastructures/weave/weave"
 	"sort"
 	"time"
 )
 
 const year = 365
 
-func startSVG() flow.WeaverFunc {
-	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+func startSVG() weave.WeaverFunc {
+	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
 		d := w.Data.(data)
 		fmt.Println(d.inside)
 		d.Image = d.Image.ViewBox(os.Stdout, 0, 0, 100, 100)
@@ -23,18 +23,18 @@ func startSVG() flow.WeaverFunc {
 	}
 }
 
-func writeDasa() flow.WeaverFunc {
-	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+func writeDasa() weave.WeaverFunc {
+	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
 		fmt.Println("time grid:", e.Time)
-		for _, e := range w.Output {
-			fmt.Println("reciever:", e)
+		for _, m := range w.Output {
+			fmt.Println("reciever:", m.Time)
 		}
 		return w
 	}
 }
 
-func writeEvent() flow.WeaverFunc {
-	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+func writeEvent() weave.WeaverFunc {
+	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
 		if !e.Valid {
 			return w
 		}
@@ -43,8 +43,8 @@ func writeEvent() flow.WeaverFunc {
 	}
 }
 
-func closeSVG() flow.WeaverFunc {
-	return func(w flow.Weaver, e flow.Event) flow.Weaver {
+func closeSVG() weave.WeaverFunc {
+	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
 		svg := w.Data.(data)
 		svg.End()
 		return w
@@ -64,9 +64,9 @@ func main() {
 	}
 	d1 := time.Date(2000, 1, 1, 0, 0, 0, 0, loc)
 	d2 := time.Date(2021, 1, 1, 0, 0, 0, 0, loc)
-	chans := make([]chan flow.Event, 4)
+	chans := make([]chan weave.Stitch, 4)
 	for i := range chans {
-		chans[i] = make(chan flow.Event)
+		chans[i] = make(chan weave.Stitch)
 	}
 	go goFlow(d1, d2, chans[0])
 	go goFlow1(d1, d2, chans[1])
@@ -75,7 +75,7 @@ func main() {
 
 	ev := generateEvents(10, d1, d2)
 
-	w := flow.Weaver{
+	w := weave.Weaver{
 		Start:     d1,
 		End:       d2,
 		PreFunc:   startSVG(),
@@ -93,48 +93,48 @@ func main() {
 	w.Date(ev, chans[0], chans[1], chans[2], chans[3])
 }
 
-func goFlow(start, end time.Time, ch chan flow.Event) {
+func goFlow(start, end time.Time, ch chan weave.Stitch) {
 	for start.Before(end) {
 		start = start.Add(time.Duration(24*year) * time.Hour)
-		ev := flow.Event{Time: start, Valid: true}
+		ev := weave.Stitch{Time: start, Valid: true}
 		ch <- ev
 	}
 	close(ch)
 }
 
-func goFlow1(start, end time.Time, ch chan flow.Event) {
+func goFlow1(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := flow.Event{Time: start, Valid: true}
+		ev := weave.Stitch{Time: start, Valid: true}
 		ch <- ev
 	}
 	close(ch)
 }
 
-func goFlow2(start, end time.Time, ch chan flow.Event) {
+func goFlow2(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := flow.Event{Time: start, Valid: true}
+		ev := weave.Stitch{Time: start, Valid: true}
 		ch <- ev
 	}
 	close(ch)
 }
 
-func goFlow3(start, end time.Time, ch chan flow.Event) {
+func goFlow3(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := flow.Event{Time: start, Valid: true}
+		ev := weave.Stitch{Time: start, Valid: true}
 		ch <- ev
 	}
 	close(ch)
 }
 
-func generateEvents(num int, start, end time.Time) flow.Events {
+func generateEvents(num int, start, end time.Time) weave.Stiches {
 
-	ev := make(flow.Events, num)
+	ev := make(weave.Stiches, num)
 	s := start.Unix()
 	e := end.Unix()
 	rng := e - s
@@ -147,7 +147,7 @@ func generateEvents(num int, start, end time.Time) flow.Events {
 	}
 
 	if num > 1 {
-		sort.Sort(flow.Events(ev))
+		sort.Sort(weave.Stiches(ev))
 	}
 
 	return ev

@@ -1,4 +1,4 @@
-package flow
+package main
 
 import (
 	"log"
@@ -17,15 +17,15 @@ func TestGenerateEvents(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		ev := generateEvents(5, d1, d2)
 		for _, e := range ev {
-			if e.Before(min) {
+			if e.Time.Before(min) {
 				min = e.Time
 			}
-			if e.After(max) {
+			if e.Time.After(max) {
 				max = e.Time
 			}
 		}
 		for _, d := range ev {
-			if d.Before(d1) || d.After(d2) {
+			if d.Time.Before(d1) || d.Time.After(d2) {
 				t.Error("error: generateDate: expected date between", d1, "and", d2, "received", d)
 				break
 			}
