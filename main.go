@@ -16,7 +16,6 @@ const year = 365
 func startSVG() weave.WeaverFunc {
 	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
 		d := w.Data.(data)
-		fmt.Println(d.inside)
 		d.Image = d.Image.ViewBox(os.Stdout, 0, 0, 100, 100)
 		w.Data = d
 		return w
@@ -52,7 +51,6 @@ func closeSVG() weave.WeaverFunc {
 }
 
 type data struct {
-	inside string
 	svg.Image
 }
 
@@ -76,18 +74,16 @@ func main() {
 	ev := generateEvents(10, d1, d2)
 
 	w := weave.Weaver{
-		Start:     d1,
-		End:       d2,
-		PreFunc:   startSVG(),
-		PreEvent:  writeDasa(),
-		Event:     writeEvent(),
-		PostEvent: nil,
-		PostFunc:  closeSVG(),
+		Start:      d1,
+		End:        d2,
+		PreWeave:   startSVG(),
+		PreStitch:  writeDasa(),
+		Stitch:     writeEvent(),
+		PostStitch: nil,
+		PostWeave:  closeSVG(),
 	}
 
-	d := data{
-		inside: "Hello World",
-	}
+	d := data{}
 	w = w.Load(d)
 
 	w.Date(ev, chans[0], chans[1], chans[2], chans[3])
@@ -132,9 +128,9 @@ func goFlow3(start, end time.Time, ch chan weave.Stitch) {
 	close(ch)
 }
 
-func generateEvents(num int, start, end time.Time) weave.Stiches {
+func generateEvents(num int, start, end time.Time) weave.Stitches {
 
-	ev := make(weave.Stiches, num)
+	ev := make(weave.Stitches, num)
 	s := start.Unix()
 	e := end.Unix()
 	rng := e - s
@@ -147,7 +143,7 @@ func generateEvents(num int, start, end time.Time) weave.Stiches {
 	}
 
 	if num > 1 {
-		sort.Sort(weave.Stiches(ev))
+		sort.Sort(weave.Stitches(ev))
 	}
 
 	return ev

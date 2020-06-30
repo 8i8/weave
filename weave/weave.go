@@ -16,35 +16,65 @@ type WeaverFunc func(Weaver, Stitch) Weaver
 
 // Weaver interleave multiple streams of dates.
 type Weaver struct {
-	Start     time.Time
-	End       time.Time
-	Data      interface{}
-	current   Stitch
-	next      Stitch
-	receiver  []receiver
-	Output    Stiches
-	PreFunc   WeaverFunc
-	PreEvent  WeaverFunc
-	Event     WeaverFunc
-	PostEvent WeaverFunc
-	PostFunc  WeaverFunc
-	debug     int
+	Start      time.Time
+	End        time.Time
+	Data       interface{}
+	current    Stitch
+	next       Stitch
+	shuttle    []shuttle
+	Output     Threads
+	PreWeave   WeaverFunc
+	PreStitch  WeaverFunc
+	Stitch     WeaverFunc
+	PostStitch WeaverFunc
+	PostWeave  WeaverFunc
+	debug      int
 }
 
-type receiver struct {
+type shuttle struct {
 	ch      chan Stitch
-	prev    Stitch
-	current Stitch
-	next    Stitch
+	prev    thread
+	current thread
+	next    thread
+}
+
+// State contains the state of a thread, accessible and maintained by the user
+// to maintain and pass state between stitches.
+type State int
+
+// thread contains a stitch and that stitches state.
+type thread struct {
+	State int
+	Stitch
+}
+
+// Threads enables the sorting of threads.
+type Threads []thread
+
+// Sort functions.
+
+// Len returns the length of the Events list.
+func (t Threads) Len() int {
+	return len(t)
+}
+
+// Less retuns a boolean response to the question is e[i] less than e[j].
+func (t Threads) Less(i, j int) bool {
+	return t[i].Time.Before(t[j].Time)
+}
+
+// Swap inverses the positions of e[i] and e[j].
+func (t Threads) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
 }
 
 // Date builds and runs a weaver, the first chanel that is provided is used as
 // a grid or ruler for structuring of all of the folling channel.
-func (w Weaver) Date(ev Stiches, chans ...chan Stitch) {
+func (w Weaver) Date(ev Stitches, chans ...chan Stitch) {
 	//w.debug= biTload | biTevent,
-	w.receiver = make([]receiver, len(chans))
+	w.shuttle = make([]shuttle, len(chans))
 	for i := range chans {
-		w.receiver[i].ch = chans[i]
+		w.shuttle[i].ch = chans[i]
 	}
 	w.weavedate(ev)
 }
@@ -56,28 +86,28 @@ func (w Weaver) Load(d interface{}) Weaver {
 }
 
 func (w Weaver) loadReceivers() Weaver {
-	for i := range w.receiver {
+	for i := range w.shuttle {
 		// Load yantra.
-		w.receiver[i].next = <-w.receiver[i].ch
+		w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
 		// Skip over closed channels.
-		if !w.receiver[i].next.Valid {
+		if !w.shuttle[i].next.Valid {
 			continue
 		}
 		// Remove all yantra in between required dates.
-		for w.receiver[i].next.Time.Before(w.Start) && w.receiver[i].next.Valid {
-			w.receiver[i].prev = w.receiver[i].current
-			w.receiver[i].current = w.receiver[i].next
-			w.receiver[i].next = <-w.receiver[i].ch
+		for w.shuttle[i].next.Time.Before(w.Start) && w.shuttle[i].next.Valid {
+			w.shuttle[i].prev = w.shuttle[i].current
+			w.shuttle[i].current = w.shuttle[i].next
+			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
 		}
 	}
-	for i := range w.receiver {
-		w.receiver[i].prev = w.receiver[i].current
-		w.receiver[i].current = w.receiver[i].next
-		w.receiver[i].next = <-w.receiver[i].ch
+	for i := range w.shuttle {
+		w.shuttle[i].prev = w.shuttle[i].current
+		w.shuttle[i].current = w.shuttle[i].next
+		w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
 	}
 
 	if w.debug&biTload > 0 {
-		for _, r := range w.receiver {
+		for _, r := range w.shuttle {
 			fmt.Println("r.prev:", r.prev)
 			fmt.Println("r.current:", r.current)
 			fmt.Println("r.next:", r.next)
@@ -88,15 +118,15 @@ func (w Weaver) loadReceivers() Weaver {
 }
 
 func (w Weaver) updateReceivers() Weaver {
-	for i := range w.receiver {
-		if !w.receiver[i].current.Valid {
+	for i := range w.shuttle {
+		if !w.shuttle[i].current.Valid {
 			continue
 		}
-		for w.receiver[i].next.Time.Before(w.next.Time) || w.receiver[i].next.Time.Equal(w.next.Time) {
-			w.receiver[i].prev = w.receiver[i].current
-			w.receiver[i].current = w.receiver[i].next
-			w.receiver[i].next = <-w.receiver[i].ch
-			if !w.receiver[i].next.Valid {
+		for w.shuttle[i].next.Time.Before(w.next.Time) || w.shuttle[i].next.Time.Equal(w.next.Time) {
+			w.shuttle[i].prev = w.shuttle[i].current
+			w.shuttle[i].current = w.shuttle[i].next
+			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
+			if !w.shuttle[i].next.Valid {
 				break
 			}
 		}
@@ -107,17 +137,17 @@ func (w Weaver) updateReceivers() Weaver {
 func (w Weaver) loadCalendar() Weaver {
 	for {
 		w.current = w.next // Set up lookahead.
-		w.next = <-w.receiver[0].ch
+		w.next = <-w.shuttle[0].ch
 		if w.next.Time.After(w.Start) {
 			break
 		}
 	}
 	w.current = w.next
-	w.next = <-w.receiver[0].ch
+	w.next = <-w.shuttle[0].ch
 	return w
 }
 
-func (w Weaver) weavedate(ev Stiches) error {
+func (w Weaver) weavedate(ev Stitches) error {
 	// Load all required data from chans.
 	j := ev.advanceTo(w.Start)
 	if w.debug&biTevent > 0 {
@@ -129,23 +159,23 @@ func (w Weaver) weavedate(ev Stiches) error {
 		return fmt.Errorf("weave: date: inValid")
 	}
 	// Extract calendar.
-	calendar := w.receiver[0].ch
-	w.receiver = w.receiver[1:]
+	calendar := w.shuttle[0].ch
+	w.shuttle = w.shuttle[1:]
 	// Output function.
-	if w.PreFunc != nil {
-		w = w.PreFunc(w, w.current)
+	if w.PreWeave != nil {
+		w = w.PreWeave(w, w.current)
 	}
 	for w.next = range calendar {
 		w = w.updateReceivers()
 		w.Output = w.Output[:0]
-		for _, r := range w.receiver {
+		for _, r := range w.shuttle {
 			if r.current.Time.Before(w.next.Time) {
 				w.Output = append(w.Output, r.current)
 			}
 		}
 		// Output function.
-		if w.PreEvent != nil {
-			w = w.PreEvent(w, w.current)
+		if w.PreStitch != nil {
+			w = w.PreStitch(w, w.current)
 		}
 		// Events.
 		for ; j < len(ev) && ev[j].Time.Before(w.next.Time); j++ {
@@ -154,13 +184,13 @@ func (w Weaver) weavedate(ev Stiches) error {
 				break
 			}
 			// Output function.
-			if w.Event != nil {
-				w = w.Event(w, ev[j])
+			if w.Stitch != nil {
+				w = w.Stitch(w, ev[j])
 			}
 		}
 		// Output function.
-		if w.PostEvent != nil {
-			w = w.PostEvent(w, w.current)
+		if w.PostStitch != nil {
+			w = w.PostStitch(w, w.current)
 		}
 		// Check out when required.
 		if w.next.Time.After(w.End) {
@@ -170,8 +200,8 @@ func (w Weaver) weavedate(ev Stiches) error {
 		w.current = w.next
 	}
 	// Output function.
-	if w.PostFunc != nil {
-		w = w.PostFunc(w, w.current)
+	if w.PostWeave != nil {
+		w = w.PostWeave(w, w.current)
 	}
 	return nil
 }
