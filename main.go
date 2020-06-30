@@ -13,8 +13,26 @@ import (
 
 const year = 365
 
-func startSVG() weave.WeaverFunc {
-	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
+func before(a, b weave.Stitch) bool {
+	i := a.Data.(time.Time)
+	j := b.Data.(time.Time)
+	return i.Before(j)
+}
+
+func equal(a, b weave.Stitch) bool {
+	i := a.Data.(time.Time)
+	j := b.Data.(time.Time)
+	return i.Equal(j)
+}
+
+func after(a, b weave.Stitch) bool {
+	i := a.Data.(time.Time)
+	j := b.Data.(time.Time)
+	return i.After(j)
+}
+
+func startSVG() weave.ShuttleFunc {
+	return func(w weave.Loom, e weave.Stitch) weave.Loom {
 		d := w.Data.(data)
 		d.Image = d.Image.ViewBox(os.Stdout, 0, 0, 100, 100)
 		w.Data = d
@@ -22,28 +40,28 @@ func startSVG() weave.WeaverFunc {
 	}
 }
 
-func writeDasa() weave.WeaverFunc {
-	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
-		fmt.Println("time grid:", e.Time)
+func writeDasa() weave.ShuttleFunc {
+	return func(w weave.Loom, e weave.Stitch) weave.Loom {
+		fmt.Println("time grid:", e.Data)
 		for _, m := range w.Output {
-			fmt.Println("reciever:", m.Time)
+			fmt.Println("reciever:", m.Stitch.Data)
 		}
 		return w
 	}
 }
 
-func writeEvent() weave.WeaverFunc {
-	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
-		if !e.Valid {
+func writeEvent() weave.ShuttleFunc {
+	return func(w weave.Loom, s weave.Stitch) weave.Loom {
+		if s.Data == nil {
 			return w
 		}
-		fmt.Println("event:", e.Time)
+		fmt.Println("event:", s.Data)
 		return w
 	}
 }
 
-func closeSVG() weave.WeaverFunc {
-	return func(w weave.Weaver, e weave.Stitch) weave.Weaver {
+func closeSVG() weave.ShuttleFunc {
+	return func(w weave.Loom, e weave.Stitch) weave.Loom {
 		svg := w.Data.(data)
 		svg.End()
 		return w
@@ -66,16 +84,21 @@ func main() {
 	for i := range chans {
 		chans[i] = make(chan weave.Stitch)
 	}
-	go goFlow(d1, d2, chans[0])
+
+	// Prepare comparison functions.
+	var fn weave.CompFuncs
+	fn = append(fn, before)
+	fn = append(fn, equal)
+	fn = append(fn, after)
+
+	go goFlow(fn, d1, d2, chans[0])
 	go goFlow1(d1, d2, chans[1])
 	go goFlow2(d1, d2, chans[2])
 	go goFlow3(d1, d2, chans[3])
 
-	ev := generateEvents(10, d1, d2)
-
-	w := weave.Weaver{
-		Start:      d1,
-		End:        d2,
+	w := weave.Loom{
+		Start:      weave.Stitch{Data: d1},
+		End:        weave.Stitch{Data: d2},
 		PreWeave:   startSVG(),
 		PreStitch:  writeDasa(),
 		Stitch:     writeEvent(),
@@ -84,15 +107,17 @@ func main() {
 	}
 
 	d := data{}
-	w = w.Load(d)
-
-	w.Date(ev, chans[0], chans[1], chans[2], chans[3])
+	w = w.LoadData(d)
+	ev := generateEvents(fn, 10, d1, d2)
+	w.Cloth(fn, ev, chans[0], chans[1], chans[2], chans[3])
 }
 
-func goFlow(start, end time.Time, ch chan weave.Stitch) {
+func goFlow(funcs weave.CompFuncs, start, end time.Time, ch chan weave.Stitch) {
 	for start.Before(end) {
 		start = start.Add(time.Duration(24*year) * time.Hour)
-		ev := weave.Stitch{Time: start, Valid: true}
+		ev := weave.Stitch{Data: start}
+		ev = ev.LoadFuncs(funcs)
+		ev.Data = start
 		ch <- ev
 	}
 	close(ch)
@@ -102,7 +127,8 @@ func goFlow1(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := weave.Stitch{Time: start, Valid: true}
+		ev := weave.Stitch{Data: start}
+		ev.Data = start
 		ch <- ev
 	}
 	close(ch)
@@ -112,7 +138,8 @@ func goFlow2(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := weave.Stitch{Time: start, Valid: true}
+		ev := weave.Stitch{Data: start}
+		ev.Data = start
 		ch <- ev
 	}
 	close(ch)
@@ -122,13 +149,14 @@ func goFlow3(start, end time.Time, ch chan weave.Stitch) {
 	start = start.Add(time.Duration(-(rand.Int63()%50)*24) * time.Hour)
 	for start.Before(end) {
 		start = start.Add(time.Duration(rand.Int63()%year*24) * time.Hour)
-		ev := weave.Stitch{Time: start, Valid: true}
+		ev := weave.Stitch{Data: start}
+		ev.Data = start
 		ch <- ev
 	}
 	close(ch)
 }
 
-func generateEvents(num int, start, end time.Time) weave.Stitches {
+func generateEvents(funcs weave.CompFuncs, num int, start, end time.Time) weave.Stitches {
 
 	ev := make(weave.Stitches, num)
 	s := start.Unix()
@@ -138,8 +166,8 @@ func generateEvents(num int, start, end time.Time) weave.Stitches {
 	for i := range ev {
 		rnd := rand.Int63()%rng + 1
 		date := time.Unix(s+rnd, 0)
-		ev[i].Time = date
-		ev[i].Valid = true
+		ev[i] = ev[i].LoadFuncs(funcs)
+		ev[i].Data = date
 	}
 
 	if num > 1 {

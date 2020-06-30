@@ -2,36 +2,38 @@ package weave
 
 import (
 	"fmt"
-	"time"
 )
 
 const (
 	biTload = 1 << iota
-	biTevent
+	biTstitch
 )
 
-// WeaverFunc are the functions run by the weaver to generate its output,
+// ShuttleFunc are the user functions run by the loom to generate its output,
 // facilitaing the use of closures when calling the functions.
-type WeaverFunc func(Weaver, Stitch) Weaver
+type ShuttleFunc func(Loom, Stitch) Loom
 
-// Weaver interleave multiple streams of dates.
-type Weaver struct {
-	Start      time.Time
-	End        time.Time
+// Loom interleave multiple streams of dates.
+type Loom struct {
+	Start      Stitch
+	End        Stitch
 	Data       interface{}
+	Output     Threads
+	PreWeave   ShuttleFunc
+	PreStitch  ShuttleFunc
+	Stitch     ShuttleFunc
+	PostStitch ShuttleFunc
+	PostWeave  ShuttleFunc
 	current    Stitch
 	next       Stitch
-	shuttle    []shuttle
-	Output     Threads
-	PreWeave   WeaverFunc
-	PreStitch  WeaverFunc
-	Stitch     WeaverFunc
-	PostStitch WeaverFunc
-	PostWeave  WeaverFunc
+	shuttle    []Shuttle
+	comp       []Comp
 	debug      int
 }
 
-type shuttle struct {
+// Shuttle carries a thread for every channel passed into the Loom when it is
+// created.
+type Shuttle struct {
 	ch      chan Stitch
 	prev    thread
 	current thread
@@ -42,13 +44,36 @@ type shuttle struct {
 // to maintain and pass state between stitches.
 type State int
 
-// thread contains a stitch and that stitches state.
+// Comp is a function type for the comparison functions on the thread type used
+// by all weave functions and its subroutines.
+type Comp func(Stitch, Stitch) bool
+
+// CompFuncs is a user defined array of comparison functions that the loom
+// requires to work.
+type CompFuncs []Comp
+
+// thread maintins the state of a channels weaving operation.
 type thread struct {
 	State int
 	Stitch
+	before Comp
+	equal  Comp
+	after  Comp
 }
 
-// Threads enables the sorting of threads.
+func (t thread) Before(n Stitch) bool {
+	return t.before(t.Stitch, n)
+}
+
+func (t thread) Equal(n Stitch) bool {
+	return t.equal(t.Stitch, n)
+}
+
+func (t thread) After(n Stitch) bool {
+	return t.after(t.Stitch, n)
+}
+
+// Threads enables the sorting of threads inside the shuttle.
 type Threads []thread
 
 // Sort functions.
@@ -60,7 +85,7 @@ func (t Threads) Len() int {
 
 // Less retuns a boolean response to the question is e[i] less than e[j].
 func (t Threads) Less(i, j int) bool {
-	return t[i].Time.Before(t[j].Time)
+	return t[i].Before(t[j].Stitch)
 }
 
 // Swap inverses the positions of e[i] and e[j].
@@ -68,33 +93,53 @@ func (t Threads) Swap(i, j int) {
 	t[i], t[j] = t[j], t[i]
 }
 
-// Date builds and runs a weaver, the first chanel that is provided is used as
+// Cloth builds and runs a weaver, the first chanel that is provided is used as
 // a grid or ruler for structuring of all of the folling channel.
-func (w Weaver) Date(ev Stitches, chans ...chan Stitch) {
+func (w Loom) Cloth(c CompFuncs, s Stitches, chans ...chan Stitch) {
 	//w.debug= biTload | biTevent,
-	w.shuttle = make([]shuttle, len(chans))
+	w.shuttle = make([]Shuttle, len(chans))
 	for i := range chans {
 		w.shuttle[i].ch = chans[i]
 	}
-	w.weavedate(ev)
+	for i, s := range w.shuttle {
+		w.Start = w.Start.LoadFuncs(c)
+		w.End = w.End.LoadFuncs(c)
+		w.shuttle[i].prev = s.prev.loadThreadFn(c)
+		w.shuttle[i].current = s.current.loadThreadFn(c)
+		w.shuttle[i].next = s.next.loadThreadFn(c)
+	}
+	w.weaveWarped(s)
 }
 
-// Load loads a user data into the weave for access inside of WeaveFunc's.
-func (w Weaver) Load(d interface{}) Weaver {
+// LoadData loads a user data into the weave for access inside of WeaveFunc's.
+func (w Loom) LoadData(d interface{}) Loom {
 	w.Data = d
 	return w
 }
 
-func (w Weaver) loadReceivers() Weaver {
+func (t thread) loadThreadFn(c CompFuncs) thread {
+	t.before, t.equal, t.after = c[0], c[1], c[2]
+	return t
+}
+
+// LoadFnComp loads the users comparison functions into the looms shuttle
+// threads.
+func (w Loom) LoadFnComp(before, equal, after Comp) CompFuncs {
+	var c CompFuncs
+	c[0], c[1], c[2] = before, equal, after
+	return c
+}
+
+func (w Loom) loadShuttle() Loom {
 	for i := range w.shuttle {
 		// Load yantra.
 		w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
 		// Skip over closed channels.
-		if !w.shuttle[i].next.Valid {
+		if w.shuttle[i].next.Data == nil {
 			continue
 		}
 		// Remove all yantra in between required dates.
-		for w.shuttle[i].next.Time.Before(w.Start) && w.shuttle[i].next.Valid {
+		for w.shuttle[i].next.Before(w.Start) {
 			w.shuttle[i].prev = w.shuttle[i].current
 			w.shuttle[i].current = w.shuttle[i].next
 			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
@@ -117,16 +162,16 @@ func (w Weaver) loadReceivers() Weaver {
 	return w
 }
 
-func (w Weaver) updateReceivers() Weaver {
+func (w Loom) passShuttle() Loom {
 	for i := range w.shuttle {
-		if !w.shuttle[i].current.Valid {
+		if w.shuttle[i].current.Data == nil {
 			continue
 		}
-		for w.shuttle[i].next.Time.Before(w.next.Time) || w.shuttle[i].next.Time.Equal(w.next.Time) {
+		for w.shuttle[i].next.Before(w.next) || w.shuttle[i].next.Equal(w.next) {
 			w.shuttle[i].prev = w.shuttle[i].current
 			w.shuttle[i].current = w.shuttle[i].next
 			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
-			if !w.shuttle[i].next.Valid {
+			if w.shuttle[i].next.Data == nil {
 				break
 			}
 		}
@@ -134,11 +179,11 @@ func (w Weaver) updateReceivers() Weaver {
 	return w
 }
 
-func (w Weaver) loadCalendar() Weaver {
+func (w Loom) loadWarp() Loom {
 	for {
 		w.current = w.next // Set up lookahead.
 		w.next = <-w.shuttle[0].ch
-		if w.next.Time.After(w.Start) {
+		if w.next.After(w.Start) {
 			break
 		}
 	}
@@ -147,59 +192,59 @@ func (w Weaver) loadCalendar() Weaver {
 	return w
 }
 
-func (w Weaver) weavedate(ev Stitches) error {
+func (w Loom) weaveWarped(s Stitches) error {
 	// Load all required data from chans.
-	j := ev.advanceTo(w.Start)
-	if w.debug&biTevent > 0 {
-		ev.debug()
+	j := s.advanceTo(w.Start)
+	if w.debug&biTstitch > 0 {
+		s.debug()
 	}
-	w = w.loadReceivers()
-	w = w.loadCalendar()
-	if w.next.Time.Equal(time.Time{}) {
-		return fmt.Errorf("weave: date: inValid")
-	}
-	// Extract calendar.
-	calendar := w.shuttle[0].ch
+	w = w.loadShuttle()
+	w = w.loadWarp()
+	// Extract warp, the firts channel that is passed into weave is
+	// extracted and used as a guide or the warp for the looms output.
+	warp := w.shuttle[0].ch
 	w.shuttle = w.shuttle[1:]
-	// Output function.
+	// User output function.
 	if w.PreWeave != nil {
 		w = w.PreWeave(w, w.current)
 	}
-	for w.next = range calendar {
-		w = w.updateReceivers()
+	for w.next = range warp {
+		w = w.passShuttle()
 		w.Output = w.Output[:0]
-		for _, r := range w.shuttle {
-			if r.current.Time.Before(w.next.Time) {
-				w.Output = append(w.Output, r.current)
+		for _, t := range w.shuttle {
+			if t.current.Before(w.next) {
+				w.Output = append(w.Output, t.current)
 			}
 		}
-		// Output function.
+		// User output function.
 		if w.PreStitch != nil {
 			w = w.PreStitch(w, w.current)
 		}
-		// Events.
-		for ; j < len(ev) && ev[j].Time.Before(w.next.Time); j++ {
+		// Stitches.
+		for ; j < len(s) && s[j].Before(w.next); j++ {
 			// Omit Events that are too recent.
-			if ev[j].Time.After(w.End) {
+			if s[j].After(w.End) {
 				break
 			}
-			// Output function.
+			// User output function.
 			if w.Stitch != nil {
-				w = w.Stitch(w, ev[j])
+				w = w.Stitch(w, s[j])
 			}
 		}
-		// Output function.
+		// User output function.
 		if w.PostStitch != nil {
 			w = w.PostStitch(w, w.current)
 		}
-		// Check out when required.
-		if w.next.Time.After(w.End) {
-			break
-		}
+
 		// Prepare for the next row.
 		w.current = w.next
+
+		// Check out when required.
+		if w.next.After(w.End) {
+			break
+		}
 	}
-	// Output function.
+	// User output function.
 	if w.PostWeave != nil {
 		w = w.PostWeave(w, w.current)
 	}
