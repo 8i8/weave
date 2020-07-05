@@ -2,6 +2,8 @@ package weave
 
 import (
 	"fmt"
+
+	"github.com/8i8/jyo/weave/svg"
 )
 
 const (
@@ -9,149 +11,157 @@ const (
 	biTstitch
 )
 
-// ShuttleFunc are the user functions run by the loom to generate its output,
-// facilitaing the use of closures when calling the functions.
-type ShuttleFunc func(Loom, Stitch) Loom
-
-// Loom interleave multiple streams of dates.
+// Loom interleave multiple streams of data.
 type Loom struct {
-	Start      Stitch
-	End        Stitch
-	Data       interface{}
-	Output     Threads
-	PreWeave   ShuttleFunc
-	PreStitch  ShuttleFunc
-	Stitch     ShuttleFunc
-	PostStitch ShuttleFunc
-	PostWeave  ShuttleFunc
-	current    Stitch
-	next       Stitch
-	shuttle    []Shuttle
-	comp       []Comp
-	debug      int
+	// The loom is essentially an abstract data type, its function is to
+	// receive and sort multiple incoming streams of data by the criteria
+	// given by user defined function, each stitch in the stream of data
+	// must arrive in an incremental order, the job of the loom is to
+	// interleave multiple consecutive streams of data, here known as
+	// threads, ordering them sequentially by way of the Shuttle and its
+	// user provided functions.
+	Start Stitch // Start indicates the first stitch of a weave.
+	End   Stitch // End indicates the last stitch of a weave.
+
+	// User data accessible by the shuttle functions during the weave.
+	UserData interface{}
+
+	// User Functions.
+	PreWeave   ShuttleFunc // Called before the algorithm starts.
+	PreStitch  ShuttleFunc // Called before the stitch function.
+	Stitch     ShuttleFunc // Performed on the users data that is fed into the weave.
+	PostStitch ShuttleFunc // Called after the stitch function.
+	PostWeave  ShuttleFunc // Called after the weave algorithm.
+
+	// Warp signals that the first channel is a warp and that warp mode is
+	// to be used, when false the weave uses the lowest value amongst all
+	// af the channels as its next regulatory line, see the threshold for
+	// more information.
+	Warp bool
+	// The warp contins the regulatory values about which the weave is
+	// structured if Warp is true.
+	warp warp
+
+	// Output is an array into which the shuttle places the thread stitches
+	// that are ready for output.
+	Output    []Stitch
+	shuttle   []thread
+	Before    Comp
+	Equal     Comp
+	After     Comp
+	Verbose   bool
+	Threshold interface{}
 }
 
-// Shuttle carries a thread for every channel passed into the Loom when it is
-// created.
-type Shuttle struct {
+// The current warps value is used in the shuttles output.
+type warp struct {
+	current Stitch
+	next    Stitch
+}
+
+// thread holds each stitch and its state inside of the shuttle one for every
+// channel that is passed into the loom.
+type thread struct {
 	ch      chan Stitch
-	prev    thread
-	current thread
-	next    thread
+	prev    Stitch
+	current Stitch
+	next    Stitch
 }
 
-// State contains the state of a thread, accessible and maintained by the user
-// to maintain and pass state between stitches.
-type State int
+// Stitch is the primary object with which the user interacts with their data,
+// it is accesable as it passes through the loom by way of user provided
+// functions; The Weave fuctions sort the streams of stitches arriving from the
+// channels inside of the encapsulating shuttle. These functions direct the
+// loom after accessing the data within the Data interface.
+type Stitch struct {
+	State int
+	Data  interface{}
+}
 
-// Comp is a function type for the comparison functions on the thread type used
-// by all weave functions and its subroutines.
+// Comp are user defined comparison functions for the stitch data type used by
+// the weave function to generate the looms woven output, principally called
+// upon by the stitches accessed from within the ShuttleFunc function calls.
 type Comp func(Stitch, Stitch) bool
 
-// CompFuncs is a user defined array of comparison functions that the loom
-// requires to work.
+// CompFuncs is a user defined array of comparison functions that enable the loom
+// to sort threads within the shuttle.
 type CompFuncs []Comp
 
-// thread maintins the state of a channels weaving operation.
-type thread struct {
-	State int
-	Stitch
-	before Comp
-	equal  Comp
-	after  Comp
+// advanceTo returns the index of the first stitch in the stitches array that
+// is greater or equal to the given stitch.
+func (w Loom) advanceTo(s []Stitch, n Stitch) int {
+	for i := range s {
+		if w.After(s[i], n) || w.Equal(s[i], n) {
+			return i
+		}
+	}
+	return 0
 }
 
-func (t thread) Before(n Stitch) bool {
-	return t.before(t.Stitch, n)
-}
+// ShuttleFunc are the principle user defined functions that are an integral
+// part of a loom; They are provided by the user when the loom is created and
+// can be updated at any time, by calling the appropriate functions. The five
+// ShuttleFunc functions are found at key points inside the main loop of the
+// loom function they are run by the loom whilst it is generating its output to
+// order stitches as the shuttle advances with each pick of the loom.
+type ShuttleFunc func(Loom, Stitch) Loom
 
-func (t thread) Equal(n Stitch) bool {
-	return t.equal(t.Stitch, n)
-}
+// State records the state of a thread withing the shuttle.
+type State int // The state of a thread withing the shuttle.
 
-func (t thread) After(n Stitch) bool {
-	return t.after(t.Stitch, n)
-}
+// Weave interleaves the objects in the stitch array with the channels that the
+// user also provides, if the flag for warp is set then the first of these
+// channels is used as the warp, a structure or guide for the output. A channel
+// of non regularly spaced events can be interleaved with this channel of
+// regularly spaced intervals, be they temporal or other. Without the warp the
+// channels and provided objects are interleaved, the coincidence of values can
+// be regulated by way of the threshold setting, reducing slightly the exigence
+// of the comparison functions, can at times greatly decrease the size of the
+// output without harming the legibility of the data, effectively in certain
+// cases increasing it.
+func (w Loom) Weave(s []Stitch, chans ...chan Stitch) {
 
-// Threads enables the sorting of threads inside the shuttle.
-type Threads []thread
-
-// Sort functions.
-
-// Len returns the length of the Events list.
-func (t Threads) Len() int {
-	return len(t)
-}
-
-// Less retuns a boolean response to the question is e[i] less than e[j].
-func (t Threads) Less(i, j int) bool {
-	return t[i].Before(t[j].Stitch)
-}
-
-// Swap inverses the positions of e[i] and e[j].
-func (t Threads) Swap(i, j int) {
-	t[i], t[j] = t[j], t[i]
-}
-
-// Cloth builds and runs a weaver, the first chanel that is provided is used as
-// a grid or ruler for structuring of all of the folling channel.
-func (w Loom) Cloth(c CompFuncs, s Stitches, chans ...chan Stitch) {
-	//w.debug= biTload | biTevent,
-	w.shuttle = make([]Shuttle, len(chans))
+	// The shuttle holds all the critical data from the channels whilst the
+	// subroutines of the algorithm are functioning.
+	w.shuttle = make([]thread, len(chans))
 	for i := range chans {
 		w.shuttle[i].ch = chans[i]
 	}
-	for i, s := range w.shuttle {
-		w.Start = w.Start.LoadFuncs(c)
-		w.End = w.End.LoadFuncs(c)
-		w.shuttle[i].prev = s.prev.loadThreadFn(c)
-		w.shuttle[i].current = s.current.loadThreadFn(c)
-		w.shuttle[i].next = s.next.loadThreadFn(c)
+	w.Warp = true
+	if w.Warp {
+		w.weaveWarped(s)
 	}
-	w.weaveWarped(s)
 }
 
 // LoadData loads a user data into the weave for access inside of WeaveFunc's.
 func (w Loom) LoadData(d interface{}) Loom {
-	w.Data = d
+	w.UserData = d
 	return w
 }
 
-func (t thread) loadThreadFn(c CompFuncs) thread {
-	t.before, t.equal, t.after = c[0], c[1], c[2]
-	return t
-}
-
-// LoadFnComp loads the users comparison functions into the looms shuttle
-// threads.
-func (w Loom) LoadFnComp(before, equal, after Comp) CompFuncs {
-	var c CompFuncs
-	c[0], c[1], c[2] = before, equal, after
-	return c
-}
-
+// loadSuhttle advances all threaded channels to the weave starting point.
 func (w Loom) loadShuttle() Loom {
 	for i := range w.shuttle {
-		// Load yantra.
-		w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
+		// Load stitches from channels.
+		w.shuttle[i].next = <-w.shuttle[i].ch
 		// Skip over closed channels.
 		if w.shuttle[i].next.Data == nil {
 			continue
 		}
 		// Remove all yantra in between required dates.
-		for w.shuttle[i].next.Before(w.Start) {
+		for w.Before(w.shuttle[i].next, w.Start) {
 			w.shuttle[i].prev = w.shuttle[i].current
 			w.shuttle[i].current = w.shuttle[i].next
-			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
+			w.shuttle[i].next = <-w.shuttle[i].ch
 		}
 	}
 	for i := range w.shuttle {
 		w.shuttle[i].prev = w.shuttle[i].current
 		w.shuttle[i].current = w.shuttle[i].next
-		w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
+		w.shuttle[i].next = <-w.shuttle[i].ch
 	}
 
-	if w.debug&biTload > 0 {
+	if w.Verbose {
 		for _, r := range w.shuttle {
 			fmt.Println("r.prev:", r.prev)
 			fmt.Println("r.current:", r.current)
@@ -162,15 +172,15 @@ func (w Loom) loadShuttle() Loom {
 	return w
 }
 
-func (w Loom) passShuttle() Loom {
+func (w Loom) threadShuttle() Loom {
 	for i := range w.shuttle {
 		if w.shuttle[i].current.Data == nil {
 			continue
 		}
-		for w.shuttle[i].next.Before(w.next) || w.shuttle[i].next.Equal(w.next) {
+		for w.Before(w.shuttle[i].next, w.warp.next) || w.Equal(w.shuttle[i].next, w.warp.next) {
 			w.shuttle[i].prev = w.shuttle[i].current
 			w.shuttle[i].current = w.shuttle[i].next
-			w.shuttle[i].next.Stitch = <-w.shuttle[i].ch
+			w.shuttle[i].next = <-w.shuttle[i].ch
 			if w.shuttle[i].next.Data == nil {
 				break
 			}
@@ -181,49 +191,54 @@ func (w Loom) passShuttle() Loom {
 
 func (w Loom) loadWarp() Loom {
 	for {
-		w.current = w.next // Set up lookahead.
-		w.next = <-w.shuttle[0].ch
-		if w.next.After(w.Start) {
+		w.warp.current = w.warp.next // Set up lookahead.
+		w.warp.next = <-w.shuttle[0].ch
+		if w.After(w.warp.next, w.Start) {
 			break
 		}
 	}
-	w.current = w.next
-	w.next = <-w.shuttle[0].ch
+	w.warp.current = w.warp.next
+	w.warp.next = <-w.shuttle[0].ch
 	return w
 }
 
-func (w Loom) weaveWarped(s Stitches) error {
+func (w Loom) weaveWarped(s []Stitch) error {
 	// Load all required data from chans.
-	j := s.advanceTo(w.Start)
-	if w.debug&biTstitch > 0 {
-		s.debug()
-	}
+	j := w.advanceTo(s, w.Start)
 	w = w.loadShuttle()
 	w = w.loadWarp()
-	// Extract warp, the firts channel that is passed into weave is
+	// Extract warp, the first channel that is passed into weave is
 	// extracted and used as a guide or the warp for the looms output.
 	warp := w.shuttle[0].ch
 	w.shuttle = w.shuttle[1:]
 	// User output function.
 	if w.PreWeave != nil {
-		w = w.PreWeave(w, w.current)
+		type mySvg struct {
+			svg.Image
+		}
+
+		w = w.PreWeave(w, w.warp.current)
 	}
-	for w.next = range warp {
-		w = w.passShuttle()
+	for w.warp.next = range warp {
+
+		// Spool channels into the shuttle.
+		w = w.threadShuttle()
+
+		// Clear then fill the shuttle output.
 		w.Output = w.Output[:0]
 		for _, t := range w.shuttle {
-			if t.current.Before(w.next) {
+			if w.Before(t.current, w.warp.next) {
 				w.Output = append(w.Output, t.current)
 			}
 		}
 		// User output function.
 		if w.PreStitch != nil {
-			w = w.PreStitch(w, w.current)
+			w = w.PreStitch(w, w.warp.current)
 		}
 		// Stitches.
-		for ; j < len(s) && s[j].Before(w.next); j++ {
+		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
 			// Omit Events that are too recent.
-			if s[j].After(w.End) {
+			if w.After(s[j], w.End) {
 				break
 			}
 			// User output function.
@@ -233,38 +248,20 @@ func (w Loom) weaveWarped(s Stitches) error {
 		}
 		// User output function.
 		if w.PostStitch != nil {
-			w = w.PostStitch(w, w.current)
+			w = w.PostStitch(w, w.warp.current)
 		}
 
 		// Prepare for the next row.
-		w.current = w.next
+		w.warp.current = w.warp.next
 
 		// Check out when required.
-		if w.next.After(w.End) {
+		if w.After(w.warp.next, w.End) {
 			break
 		}
 	}
 	// User output function.
 	if w.PostWeave != nil {
-		w = w.PostWeave(w, w.current)
+		w = w.PostWeave(w, w.warp.current)
 	}
 	return nil
 }
-
-// func weavedasa(w Weaver, ev Events) error {
-// 	// Find first event index.
-// 	j := ev.advanceTo(w.Start)
-// 	if w.debug&biTevent > 0 {
-// 		ev.debug()
-// 	}
-
-// 	w = w.loadReceivers()
-
-// 	if w.PreFunc != nil {
-// 		w.PreFunc()
-// 	}
-
-// 	for w.next.Valid {
-// 	}
-// 	return nil
-// }
