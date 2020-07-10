@@ -1,0 +1,12 @@
+main
+out
+.projectile
+note.md
+*.swp
+test*
+*.bac
+Session.vim
+run
+start
+*.swp
+.Session.auto
