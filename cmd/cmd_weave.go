@@ -12,7 +12,7 @@ import (
 	"github.com/8i8/jyo/weave/weave"
 )
 
-const year = 365
+const year = 365 // And a bit.
 
 // Sort function required by the loom.
 func lessThan(a, b weave.Stitch) bool {
@@ -34,7 +34,7 @@ func greaterThan(a, b weave.Stitch) bool {
 }
 
 // shuttle functions required by the loom.
-func startSVG() weave.ShuttleFunc {
+func startSVG() weave.FnShuttle {
 	return func(w weave.Loom, e weave.Stitch) weave.Loom {
 		d := w.UserData.(mySvg)
 		d.Image = d.Image.ViewBox(os.Stdout, 0, 0, 100, 100)
@@ -43,7 +43,7 @@ func startSVG() weave.ShuttleFunc {
 	}
 }
 
-func writeDasa() weave.ShuttleFunc {
+func writeDasa() weave.FnShuttle {
 	return func(w weave.Loom, e weave.Stitch) weave.Loom {
 		fmt.Println("time grid:", e.Data)
 		for _, m := range w.Output {
@@ -53,7 +53,7 @@ func writeDasa() weave.ShuttleFunc {
 	}
 }
 
-func writeEvent() weave.ShuttleFunc {
+func writeEvent() weave.FnShuttle {
 	return func(w weave.Loom, s weave.Stitch) weave.Loom {
 		if s.Data == nil {
 			return w
@@ -63,7 +63,7 @@ func writeEvent() weave.ShuttleFunc {
 	}
 }
 
-func closeSVG() weave.ShuttleFunc {
+func closeSVG() weave.FnShuttle {
 	return func(w weave.Loom, e weave.Stitch) weave.Loom {
 		svg := w.UserData.(mySvg)
 		svg.End()
@@ -123,15 +123,14 @@ func (s cmdStitches) Len() int {
 	return len(s)
 }
 
-// Less returns a boolean response to the question is e[i] less than e[j].
+// Less returns true if s[i] is less than s[j].
 func (s cmdStitches) Less(i, j int) bool {
-	//return s[i].Before(s[j])
 	t1 := s[i].Data.(time.Time)
 	t2 := s[j].Data.(time.Time)
 	return t1.Before(t2)
 }
 
-// Swap inverses the positions of e[i] and e[j].
+// Swap exchanges e[i] and e[j].
 func (s cmdStitches) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }

@@ -27,33 +27,38 @@ type Loom struct {
 	UserData interface{}
 
 	// User Functions.
-	PreWeave   ShuttleFunc // Called before the algorithm starts.
-	PreStitch  ShuttleFunc // Called before the stitch function.
-	Stitch     ShuttleFunc // Performed on the users data that is fed into the weave.
-	PostStitch ShuttleFunc // Called after the stitch function.
-	PostWeave  ShuttleFunc // Called after the weave algorithm.
+	PreWeave   FnShuttle // Called before the algorithm starts.
+	PreStitch  FnShuttle // Called before the stitch function.
+	Stitch     FnShuttle // Performed on the users data that is fed into the loom.
+	PostStitch FnShuttle // Called after the stitch function.
+	PostWeave  FnShuttle // Called after the weave algorithm.
 
-	// Warp signals that the first channel is a warp and that warp mode is
+	// WarpOn signals that the first channel is a warp and that warp mode is
 	// to be used, when false the weave uses the lowest value amongst all
 	// af the channels as its next regulatory line, see the threshold for
 	// more information.
-	Warp bool
+	WarpOn bool
 	// The warp contins the regulatory values about which the weave is
 	// structured if Warp is true.
 	warp warp
 
 	// Output is an array into which the shuttle places the thread stitches
 	// that are ready for output.
-	Output    []Stitch
-	shuttle   []thread
-	Before    Comp
-	Equal     Comp
-	After     Comp
+	Output []Stitch
+	Shuttle
+	Before FnComp
+	Equal  FnComp
+	After  FnComp
+
 	Verbose   bool
 	Threshold interface{}
 }
 
-// The current warps value is used in the shuttles output.
+// Shuttle contains all of the current working threads in the loom.
+type Shuttle []thread
+
+// The current warps value is used in the shuttles output and the next value
+// for lookahead.
 type warp struct {
 	current Stitch
 	next    Stitch
