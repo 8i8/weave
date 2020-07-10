@@ -1,15 +1,43 @@
 package weave
 
 import (
+	"errors"
 	"fmt"
-
-	"github.com/8i8/jyo/weave/svg"
 )
 
-const (
-	biTload = 1 << iota
-	biTstitch
-)
+// ErrNilPointer points towards nothing.
+var ErrNilPointer = errors.New("nil pointer")
+
+// ErrOutOfBounds value out of bounds.
+var ErrOutOfBounds = errors.New("vlaue out of index bounds")
+
+// FnComp are user defined comparison functions for the stitch data type used by
+// the weave function to generate the looms woven output, principally called
+// upon by the stitches accessed from within the ShuttleFunc function calls.
+type FnComp func(Stitch, Stitch) bool
+
+// FnShuttle are the principle user defined functions that are an integral
+// part of a loom; They are provided by the user when the loom is created and
+// can be updated at any time, by calling the appropriate functions. The five
+// FnShuttle functions are found at key points inside the main loop of the
+// loom function they are run by the loom whilst it is generating its output to
+// order stitches as the shuttle advances with each pick of the loom.
+type FnShuttle func(Loom, Stitch) Loom
+
+// State records the state of a thread withing the shuttle.
+type State int // The state of a thread withing the shuttle.
+
+// Stitch is the primary object with which the we interacts with our data from
+// the code that calls the package, accesable as it passes through the loom by
+// way of the above function types; The Weave fuctions sort our streams of data
+// encapuslating them in channels of stitches that the weave fuctions pass
+// though the algorithem where it is sorted by the provided Comp functions.
+// then into the ShuttleFunc's where we can accesess it by way of those
+// functions that we have also provided.
+type Stitch struct {
+	State int
+	Data  interface{}
+}
 
 // Loom interleave multiple streams of data.
 type Loom struct {
@@ -73,46 +101,24 @@ type thread struct {
 	next    Stitch
 }
 
-// Stitch is the primary object with which the user interacts with their data,
-// it is accesable as it passes through the loom by way of user provided
-// functions; The Weave fuctions sort the streams of stitches arriving from the
-// channels inside of the encapsulating shuttle. These functions direct the
-// loom after accessing the data within the Data interface.
-type Stitch struct {
-	State int
-	Data  interface{}
-}
-
-// Comp are user defined comparison functions for the stitch data type used by
-// the weave function to generate the looms woven output, principally called
-// upon by the stitches accessed from within the ShuttleFunc function calls.
-type Comp func(Stitch, Stitch) bool
-
-// CompFuncs is a user defined array of comparison functions that enable the loom
-// to sort threads within the shuttle.
-type CompFuncs []Comp
-
-// advanceTo returns the index of the first stitch in the stitches array that
+// firstIndex returns the index of the first stitch in the stitches array that
 // is greater or equal to the given stitch.
-func (w Loom) advanceTo(s []Stitch, n Stitch) int {
+func (w Loom) firstIndex(s []Stitch, n Stitch) (int, error) {
 	for i := range s {
 		if w.After(s[i], n) || w.Equal(s[i], n) {
-			return i
+			if s[i].Data == nil {
+				return 0, fmt.Errorf("firstIndex: at index %d: %w", i, ErrNilPointer)
+			}
+			return i, nil
 		}
 	}
-	return 0
+	return 0, fmt.Errorf("firstIndex: %w", ErrOutOfBounds)
 }
 
-// ShuttleFunc are the principle user defined functions that are an integral
-// part of a loom; They are provided by the user when the loom is created and
-// can be updated at any time, by calling the appropriate functions. The five
-// ShuttleFunc functions are found at key points inside the main loop of the
-// loom function they are run by the loom whilst it is generating its output to
-// order stitches as the shuttle advances with each pick of the loom.
-type ShuttleFunc func(Loom, Stitch) Loom
-
-// State records the state of a thread withing the shuttle.
-type State int // The state of a thread withing the shuttle.
+// Warp returns the stitch that is currently the warp in the loom.
+func (w Loom) Warp() Stitch {
+	return w.warp.current
+}
 
 // Weave interleaves the objects in the stitch array with the channels that the
 // user also provides, if the flag for warp is set then the first of these
@@ -124,18 +130,22 @@ type State int // The state of a thread withing the shuttle.
 // of the comparison functions, can at times greatly decrease the size of the
 // output without harming the legibility of the data, effectively in certain
 // cases increasing it.
-func (w Loom) Weave(s []Stitch, chans ...chan Stitch) {
+func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
 
 	// The shuttle holds all the critical data from the channels whilst the
 	// subroutines of the algorithm are functioning.
-	w.shuttle = make([]thread, len(chans))
+	w.Shuttle = make([]thread, len(chans))
 	for i := range chans {
-		w.shuttle[i].ch = chans[i]
+		w.Shuttle[i].ch = chans[i]
 	}
-	w.Warp = true
-	if w.Warp {
-		w.weaveWarped(s)
+	w.WarpOn = true
+	if w.WarpOn {
+		err := w.weaveWarped(s)
+		if err != nil {
+			return fmt.Errorf("Weave: %w", err)
+		}
 	}
+	return nil
 }
 
 // LoadData loads a user data into the weave for access inside of WeaveFunc's.
@@ -145,106 +155,118 @@ func (w Loom) LoadData(d interface{}) Loom {
 }
 
 // loadSuhttle advances all threaded channels to the weave starting point.
-func (w Loom) loadShuttle() Loom {
-	for i := range w.shuttle {
+func (w Loom) threadShuttle() (Loom, error) {
+
+	for i := range w.Shuttle {
 		// Load stitches from channels.
-		w.shuttle[i].next = <-w.shuttle[i].ch
-		// Skip over closed channels.
-		if w.shuttle[i].next.Data == nil {
+		w.Shuttle[i].next = <-w.Shuttle[i].ch
+		if w.Shuttle[i].next.Data == nil {
 			continue
 		}
-		// Remove all yantra in between required dates.
-		for w.Before(w.shuttle[i].next, w.Start) {
-			w.shuttle[i].prev = w.shuttle[i].current
-			w.shuttle[i].current = w.shuttle[i].next
-			w.shuttle[i].next = <-w.shuttle[i].ch
+		// We need to remove all stitches from the input, between the
+		// first and values and our required starting value.
+		for w.Before(w.Shuttle[i].next, w.Start) {
+			w.Shuttle[i].prev = w.Shuttle[i].current
+			w.Shuttle[i].current = w.Shuttle[i].next
+			w.Shuttle[i].next = <-w.Shuttle[i].ch
 		}
 	}
-	for i := range w.shuttle {
-		w.shuttle[i].prev = w.shuttle[i].current
-		w.shuttle[i].current = w.shuttle[i].next
-		w.shuttle[i].next = <-w.shuttle[i].ch
+	for i := range w.Shuttle {
+		if w.Shuttle[i].next.Data == nil {
+			return w, fmt.Errorf("w.threadShuttle: index %d: %w", i, ErrNilPointer)
+		}
 	}
-
 	if w.Verbose {
-		for _, r := range w.shuttle {
+		for _, r := range w.Shuttle {
 			fmt.Println("r.prev:", r.prev)
 			fmt.Println("r.current:", r.current)
 			fmt.Println("r.next:", r.next)
 		}
 	}
 
-	return w
+	return w, nil
 }
 
-func (w Loom) threadShuttle() Loom {
-	for i := range w.shuttle {
-		if w.shuttle[i].current.Data == nil {
-			continue
-		}
-		for w.Before(w.shuttle[i].next, w.warp.next) || w.Equal(w.shuttle[i].next, w.warp.next) {
-			w.shuttle[i].prev = w.shuttle[i].current
-			w.shuttle[i].current = w.shuttle[i].next
-			w.shuttle[i].next = <-w.shuttle[i].ch
-			if w.shuttle[i].next.Data == nil {
-				break
+func (w Loom) advanceShuttle() (Loom, error) {
+	for i := range w.Shuttle {
+		for w.Before(w.Shuttle[i].next, w.warp.next) || w.Equal(w.Shuttle[i].next, w.warp.next) {
+			w.Shuttle[i].prev = w.Shuttle[i].current
+			w.Shuttle[i].current = w.Shuttle[i].next
+			w.Shuttle[i].next = <-w.Shuttle[i].ch
+			if w.Shuttle[i].next.Data == nil {
+				return w, fmt.Errorf("advanceShuttle: %w", ErrNilPointer)
 			}
 		}
 	}
-	return w
+	return w, nil
 }
 
-func (w Loom) loadWarp() Loom {
+func (w Loom) loadWarp() (Loom, error) {
+
+	w.warp.next = <-w.Shuttle[0].ch // Set up lookahead.
+	if w.warp.next.Data == nil {
+		return w, fmt.Errorf("w.loadWarp: %w", ErrNilPointer)
+	}
 	for {
-		w.warp.current = w.warp.next // Set up lookahead.
-		w.warp.next = <-w.shuttle[0].ch
+		w.warp.current = w.warp.next
 		if w.After(w.warp.next, w.Start) {
 			break
 		}
+		w.warp.next = <-w.Shuttle[0].ch
+		if w.warp.next.Data == nil {
+			return w, fmt.Errorf("w.loadWarp: %w", ErrNilPointer)
+		}
 	}
-	w.warp.current = w.warp.next
-	w.warp.next = <-w.shuttle[0].ch
-	return w
+	return w, nil
 }
 
 func (w Loom) weaveWarped(s []Stitch) error {
 	// Load all required data from chans.
-	j := w.advanceTo(s, w.Start)
-	w = w.loadShuttle()
-	w = w.loadWarp()
+	j, err := w.firstIndex(s, w.Start)
+	if err != nil && !errors.Is(err, ErrOutOfBounds) {
+		return fmt.Errorf("weaveWarped: %w", err)
+	}
+	w, err = w.threadShuttle()
+	if err != nil {
+		return fmt.Errorf("weaveWarped: %w", err)
+	}
+	w, err = w.loadWarp()
+	if err != nil {
+		return fmt.Errorf("weaveWarped: %w", err)
+	}
 	// Extract warp, the first channel that is passed into weave is
 	// extracted and used as a guide or the warp for the looms output.
-	warp := w.shuttle[0].ch
-	w.shuttle = w.shuttle[1:]
+	warp := w.Shuttle[0].ch
+	w.Shuttle = w.Shuttle[1:]
 	// User output function.
 	if w.PreWeave != nil {
-		type mySvg struct {
-			svg.Image
-		}
-
 		w = w.PreWeave(w, w.warp.current)
 	}
 	for w.warp.next = range warp {
-
 		// Spool channels into the shuttle.
-		w = w.threadShuttle()
-
+		w, err = w.advanceShuttle()
+		if err != nil {
+			return fmt.Errorf("weaveWarped %w", err)
+		}
 		// Clear then fill the shuttle output.
 		w.Output = w.Output[:0]
-		for _, t := range w.shuttle {
+		for _, t := range w.Shuttle {
 			if w.Before(t.current, w.warp.next) {
 				w.Output = append(w.Output, t.current)
 			}
 		}
 		// User output function.
 		if w.PreStitch != nil {
-			w = w.PreStitch(w, w.warp.current)
+			w = w.PreStitch(w, w.warp.next)
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
 			// Omit Events that are too recent.
 			if w.After(s[j], w.End) {
 				break
+			}
+			if s[j].Data == nil {
+				return fmt.Errorf("weaveWarped: stitches: %w", ErrNilPointer)
 			}
 			// User output function.
 			if w.Stitch != nil {
@@ -255,10 +277,8 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		if w.PostStitch != nil {
 			w = w.PostStitch(w, w.warp.current)
 		}
-
 		// Prepare for the next row.
 		w.warp.current = w.warp.next
-
 		// Check out when required.
 		if w.After(w.warp.next, w.End) {
 			break
