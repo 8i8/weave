@@ -187,20 +187,6 @@ func (w Loom) threadShuttle() (Loom, error) {
 	return w, nil
 }
 
-func (w Loom) advanceShuttle() (Loom, error) {
-	for i := range w.Shuttle {
-		for w.Before(w.Shuttle[i].next, w.warp.next) || w.Equal(w.Shuttle[i].next, w.warp.next) {
-			w.Shuttle[i].prev = w.Shuttle[i].current
-			w.Shuttle[i].current = w.Shuttle[i].next
-			w.Shuttle[i].next = <-w.Shuttle[i].ch
-			if w.Shuttle[i].next.Data == nil {
-				return w, fmt.Errorf("advanceShuttle: %w", ErrNilPointer)
-			}
-		}
-	}
-	return w, nil
-}
-
 func (w Loom) loadWarp() (Loom, error) {
 
 	w.warp.next = <-w.Shuttle[0].ch // Set up lookahead.
@@ -218,6 +204,22 @@ func (w Loom) loadWarp() (Loom, error) {
 		}
 	}
 	return w, nil
+}
+
+func (w Loom) advanceShuttle() (Loom, error) {
+	var err error
+	for i := range w.Shuttle {
+		for w.Before(w.Shuttle[i].next, w.warp.next) || w.Equal(w.Shuttle[i].next, w.warp.next) {
+			w.Shuttle[i].prev = w.Shuttle[i].current
+			w.Shuttle[i].current = w.Shuttle[i].next
+			w.Shuttle[i].next = <-w.Shuttle[i].ch
+			if w.Shuttle[i].next.Data == nil {
+				err = fmt.Errorf("advanceShuttle: index %d: %w", i, ErrNilPointer)
+				break
+			}
+		}
+	}
+	return w, err
 }
 
 func (w Loom) weaveWarped(s []Stitch) error {
@@ -246,13 +248,13 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		// Spool channels into the shuttle.
 		w, err = w.advanceShuttle()
 		if err != nil {
-			return fmt.Errorf("weaveWarped %w", err)
+			return fmt.Errorf("weaveWarped: %w", err)
 		}
 		// Clear then fill the shuttle output.
 		w.Output = w.Output[:0]
-		for _, t := range w.Shuttle {
-			if w.Before(t.current, w.warp.next) {
-				w.Output = append(w.Output, t.current)
+		for _, thrd := range w.Shuttle {
+			if w.Before(thrd.current, w.warp.next) {
+				w.Output = append(w.Output, thrd.current)
 			}
 		}
 		// User output function.
@@ -277,12 +279,12 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		if w.PostStitch != nil {
 			w = w.PostStitch(w, w.warp.current)
 		}
-		// Prepare for the next row.
-		w.warp.current = w.warp.next
-		// Check out when required.
+		// Check out if required.
 		if w.After(w.warp.next, w.End) {
 			break
 		}
+		// Prepare for the next row.
+		w.warp.current = w.warp.next
 	}
 	// User output function.
 	if w.PostWeave != nil {
