@@ -9,7 +9,7 @@ import (
 var ErrNilPointer = errors.New("nil pointer")
 
 // ErrOutOfBounds value out of bounds.
-var ErrOutOfBounds = errors.New("vlaue out of index bounds")
+var ErrOutOfBounds = errors.New("index out of bounds")
 
 // FnComp are user defined comparison functions for the stitch data type used by
 // the weave function to generate the looms woven output, principally called
@@ -18,21 +18,21 @@ type FnComp func(Stitch, Stitch) bool
 
 // FnShuttle are the principle user defined functions that are an integral
 // part of a loom; They are provided by the user when the loom is created and
-// can be updated at any time, by calling the appropriate functions. The five
+// can be updated at any time, by calling the appropriate functions.  The five
 // FnShuttle functions are found at key points inside the main loop of the
 // loom function they are run by the loom whilst it is generating its output to
 // order stitches as the shuttle advances with each pick of the loom.
 type FnShuttle func(Loom, Stitch) Loom
 
-// State records the state of a thread withing the shuttle.
-type State int // The state of a thread withing the shuttle.
+// State records the state of a thread within the shuttle.
+type State int
 
 // Stitch is the primary object with which the we interacts with our data from
-// the code that calls the package, accesable as it passes through the loom by
-// way of the above function types; The Weave fuctions sort our streams of data
-// encapuslating them in channels of stitches that the weave fuctions pass
-// though the algorithem where it is sorted by the provided Comp functions.
-// then into the ShuttleFunc's where we can accesess it by way of those
+// the code that calls the package, accessible as it passes through the loom by
+// way of the above function types; The Weave factions sort our streams of data
+// encapsulating them in channels of stitches that the weave functions pass
+// though the algorithm where it is sorted by the provided Comp functions.
+// Then into the ShuttleFunc's from where we can access it by way of those
 // functions that we have also provided.
 type Stitch struct {
 	State int
@@ -42,12 +42,12 @@ type Stitch struct {
 // Loom interleave multiple streams of data.
 type Loom struct {
 	// The loom is essentially an abstract data type, its function is to
-	// receive and sort multiple incoming streams of data by the criteria
-	// given by user defined function, each stitch in the stream of data
-	// must arrive in an incremental order, the job of the loom is to
-	// interleave multiple consecutive streams of data, here known as
-	// threads, ordering them sequentially by way of the Shuttle and its
-	// user provided functions.
+	// receive and sort multiple incoming streams of data by a criteria
+	// defined by user function, each stitch in the stream of data must
+	// arrive in an incremental order, the job of the loom is to interleave
+	// multiple consecutive streams of data, here known as threads,
+	// ordering them sequentially by way of the Shuttle and its user
+	// provided functions.
 	Start Stitch // Start indicates the first stitch of a weave.
 	End   Stitch // End indicates the last stitch of a weave.
 
@@ -63,10 +63,10 @@ type Loom struct {
 
 	// WarpOn signals that the first channel is a warp and that warp mode is
 	// to be used, when false the weave uses the lowest value amongst all
-	// af the channels as its next regulatory line, see the threshold for
+	// of the channels as its next regulatory line, see the threshold for
 	// more information.
 	WarpOn bool
-	// The warp contins the regulatory values about which the weave is
+	// The warp contains the regulatory values about which the weave is
 	// structured if Warp is true.
 	warp warp
 
@@ -104,15 +104,17 @@ type thread struct {
 // firstIndex returns the index of the first stitch in the stitches array that
 // is greater or equal to the given stitch.
 func (w Loom) firstIndex(s []Stitch, n Stitch) (int, error) {
+	const fname = "firstIndex"
 	for i := range s {
 		if w.After(s[i], n) || w.Equal(s[i], n) {
 			if s[i].Data == nil {
-				return 0, fmt.Errorf("firstIndex: at index %d: %w", i, ErrNilPointer)
+				return 0, fmt.Errorf(fname+
+					": at index %d: %w", i, ErrNilPointer)
 			}
 			return i, nil
 		}
 	}
-	return 0, fmt.Errorf("firstIndex: %w", ErrOutOfBounds)
+	return 0, fmt.Errorf(fname+": %w", ErrOutOfBounds)
 }
 
 // Warp returns the stitch that is currently the warp in the loom.
@@ -131,7 +133,7 @@ func (w Loom) Warp() Stitch {
 // output without harming the legibility of the data, effectively in certain
 // cases increasing it.
 func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
-
+	const fname = "Weave"
 	// The shuttle holds all the critical data from the channels whilst the
 	// subroutines of the algorithm are functioning.
 	w.Shuttle = make([]thread, len(chans))
@@ -142,7 +144,7 @@ func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
 	if w.WarpOn {
 		err := w.weaveWarped(s)
 		if err != nil {
-			return fmt.Errorf("Weave: %w", err)
+			return fmt.Errorf(fname+": %w", err)
 		}
 	}
 	return nil
@@ -156,7 +158,7 @@ func (w Loom) LoadData(d interface{}) Loom {
 
 // loadSuhttle advances all threaded channels to the weave starting point.
 func (w Loom) threadShuttle() (Loom, error) {
-
+	const fname = "w.threadShuttle"
 	for i := range w.Shuttle {
 		// Load stitches from channels.
 		w.Shuttle[i].next = <-w.Shuttle[i].ch
@@ -173,7 +175,8 @@ func (w Loom) threadShuttle() (Loom, error) {
 	}
 	for i := range w.Shuttle {
 		if w.Shuttle[i].next.Data == nil {
-			return w, fmt.Errorf("w.threadShuttle: index %d: %w", i, ErrNilPointer)
+			return w, fmt.Errorf(
+				fname+": index %d: %w", i, ErrNilPointer)
 		}
 	}
 	if w.Verbose {
@@ -188,10 +191,10 @@ func (w Loom) threadShuttle() (Loom, error) {
 }
 
 func (w Loom) loadWarp() (Loom, error) {
-
+	const fname = "w.loadWarp"
 	w.warp.next = <-w.Shuttle[0].ch // Set up lookahead.
 	if w.warp.next.Data == nil {
-		return w, fmt.Errorf("w.loadWarp: %w", ErrNilPointer)
+		return w, fmt.Errorf(fname+": %w", ErrNilPointer)
 	}
 	for {
 		w.warp.current = w.warp.next
@@ -200,21 +203,24 @@ func (w Loom) loadWarp() (Loom, error) {
 		}
 		w.warp.next = <-w.Shuttle[0].ch
 		if w.warp.next.Data == nil {
-			return w, fmt.Errorf("w.loadWarp: %w", ErrNilPointer)
+			return w, fmt.Errorf(fname+": %w", ErrNilPointer)
 		}
 	}
 	return w, nil
 }
 
 func (w Loom) advanceShuttle() (Loom, error) {
+	const fname = "advanceShuttle"
 	var err error
 	for i := range w.Shuttle {
-		for w.Before(w.Shuttle[i].next, w.warp.next) || w.Equal(w.Shuttle[i].next, w.warp.next) {
+		for w.Before(w.Shuttle[i].next, w.warp.next) ||
+			w.Equal(w.Shuttle[i].next, w.warp.next) {
 			w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 			if w.Shuttle[i].next.Data == nil {
-				err = fmt.Errorf("advanceShuttle: index %d: %w", i, ErrNilPointer)
+				err = fmt.Errorf(fname+
+					": index %d: %w", i, ErrNilPointer)
 				break
 			}
 		}
@@ -223,18 +229,19 @@ func (w Loom) advanceShuttle() (Loom, error) {
 }
 
 func (w Loom) weaveWarped(s []Stitch) error {
+	const fname = "weaveWarped"
 	// Load all required data from chans.
 	j, err := w.firstIndex(s, w.Start)
 	if err != nil && !errors.Is(err, ErrOutOfBounds) {
-		return fmt.Errorf("weaveWarped: %w", err)
+		return fmt.Errorf(fname+": %w", err)
 	}
 	w, err = w.threadShuttle()
 	if err != nil {
-		return fmt.Errorf("weaveWarped: %w", err)
+		return fmt.Errorf(fname+": %w", err)
 	}
 	w, err = w.loadWarp()
 	if err != nil {
-		return fmt.Errorf("weaveWarped: %w", err)
+		return fmt.Errorf(fname+": %w", err)
 	}
 	// Extract warp, the first channel that is passed into weave is
 	// extracted and used as a guide or the warp for the looms output.
@@ -248,7 +255,7 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		// Spool channels into the shuttle.
 		w, err = w.advanceShuttle()
 		if err != nil {
-			return fmt.Errorf("weaveWarped: %w", err)
+			return fmt.Errorf(fname+": %w", err)
 		}
 		// Clear then fill the shuttle output.
 		w.Output = w.Output[:0]
@@ -268,7 +275,8 @@ func (w Loom) weaveWarped(s []Stitch) error {
 				break
 			}
 			if s[j].Data == nil {
-				return fmt.Errorf("weaveWarped: stitches: %w", ErrNilPointer)
+				return fmt.Errorf(fname+
+					": stitches: %w", ErrNilPointer)
 			}
 			// User output function.
 			if w.Stitch != nil {
