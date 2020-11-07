@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/8i8/jyo/weave/svg"
-	"github.com/8i8/jyo/weave/weave"
+	"github.com/8i8/kala/weave/weave"
+	"github.com/8i8/svg"
 )
 
 const year = 365 // And a bit.
