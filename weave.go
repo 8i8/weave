@@ -413,6 +413,10 @@ func (w Loom) weave(s []Stitch) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", fname, err)
 		}
+		// Fin.
+		if w.warp.next.Data == nil {
+			break
+		}
 		// User output function.
 		if w.PreStitch != nil {
 			w = w.PreStitch(w, w.warp.next)
