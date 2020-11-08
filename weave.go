@@ -234,12 +234,13 @@ func (w Loom) loadWarp() (Loom, error) {
 	return w, nil
 }
 
+// advanceShuttle moves the shuttle forwards to the next warp.
 func (w Loom) advanceShuttle() (Loom, error) {
 	const fname = "advanceShuttle"
 	var err error
 	for i := range w.Shuttle {
-		for w.Before(w.Shuttle[i].next, w.warp.next) ||
-			w.Equal(w.Shuttle[i].next, w.warp.next) {
+		for !w.After(w.Shuttle[i].next, w.warp.next) {
+
 			w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
@@ -344,15 +345,15 @@ func (w Loom) weave(s []Stitch) error {
 	}
 
 	for {
-		// Spool channels into the shuttle.
+		// Clear then fill the shuttle output.
+		w.Output = w.Output[:0]
+
 		w, err = w.advanceShuttle()
 		if err != nil {
 			return fmt.Errorf("%s: %w", fname, err)
 		}
-		// Clear then fill the shuttle output.
-		w.Output = w.Output[:0]
 		for _, thrd := range w.Shuttle {
-			if w.Before(thrd.current, thrd.current) {
+			if w.Before(thrd.current, w.warp.next) {
 				w.Output = append(w.Output, thrd.current)
 			}
 		}
