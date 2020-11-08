@@ -30,7 +30,8 @@ type FnAdd func(Stitch, interface{}) Stitch
 // each pick of the loom.
 type FnShuttle func(Loom, Stitch) Loom
 
-// State records the state of a thread within the shuttle.
+// State records the state of a thread within a Stitch, used within the
+// loom to mark stitches for writing, or other.
 type State int
 
 const (
@@ -94,7 +95,7 @@ type Loom struct {
 
 	// Threshold defines the increment used to group together values
 	// when the warp is not set.
-	Threshold Stitch
+	Threshold interface{}
 
 	// Output is an array into which the shuttle places the thread
 	// stitches that are ready for output.
