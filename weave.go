@@ -19,7 +19,7 @@ type FnComp func(Stitch, Stitch) bool
 
 // FnAdd is a user defined function that returns the sum of two stitch
 // data values.
-type FnAdd func(Stitch, Stitch) Stitch
+type FnAdd func(Stitch, interface{}) Stitch
 
 // FnShuttle are the principle user defined functions that are an integral
 // part of a loom; They are provided by the user when the loom is created
