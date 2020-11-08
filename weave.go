@@ -35,8 +35,8 @@ type FnShuttle func(Loom, Stitch) Loom
 type State int
 
 const (
-	Empty   State = 0
-	Written State = 1 << iota
+	Stale State = 0
+	Fresh State = 1 << iota
 )
 
 // Stitch is the primary object with which the we interacts with our data
@@ -380,11 +380,12 @@ func (w Loom) advanceShuttle() (Loom, error) {
 		}
 		if !w.After(w.Shuttle[i].next, w.warp.next) {
 			w.Output[i] = w.Shuttle[i].next
-			w.Output[i].State = Written
+			w.Output[i].State = Fresh
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 			continue
 		}
-		w.Output[i].State = Empty
+		w.Output[i] = w.Shuttle[i].next
+		w.Output[i].State = Stale
 	}
 	return w, nil
 }
