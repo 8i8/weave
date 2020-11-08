@@ -17,6 +17,10 @@ var ErrOutOfBounds = errors.New("index out of bounds")
 // ShuttleFunc function calls.
 type FnComp func(Stitch, Stitch) bool
 
+// FnAdd is a user defined function that returns the sum of two stitch
+// data values.
+type FnAdd func(Stitch, Stitch) Stitch
+
 // FnShuttle are the principle user defined functions that are an integral
 // part of a loom; They are provided by the user when the loom is created
 // and can be updated at any time, by calling the appropriate functions.
@@ -29,6 +33,11 @@ type FnShuttle func(Loom, Stitch) Loom
 // State records the state of a thread within the shuttle.
 type State int
 
+const (
+	Empty   State = 0
+	Written State = 1 << iota
+)
+
 // Stitch is the primary object with which the we interacts with our data
 // from the code that calls the package, accessible as it passes through
 // the loom by way of the above function types; The Weave functions sort
@@ -39,11 +48,11 @@ type State int
 // that are also user defined.
 type Stitch struct {
 	// State is to be used to define whether the stitch is in use or
-	// not or if it has been counted, used user side.
-	State int
-	// Type defines the type of that which is inside the interface.
-	Type int
-	Data interface{}
+	// not or if it has been written too, used user side to
+	// ascertain whether a stitch's data is to be written. It may also
+	// be used to define the type of the data within the interface.
+	State State
+	Data  interface{}
 }
 
 // Loom interleave multiple streams of data.
@@ -85,7 +94,7 @@ type Loom struct {
 
 	// Threshold defines the increment used to group together values
 	// when the warp is not set.
-	Threshold interface{}
+	Threshold Stitch
 
 	// Output is an array into which the shuttle places the thread
 	// stitches that are ready for output.
@@ -94,6 +103,7 @@ type Loom struct {
 	Before FnComp
 	Equal  FnComp
 	After  FnComp
+	Add    FnAdd
 
 	Verbose bool
 }
@@ -183,19 +193,21 @@ func (w Loom) LoadData(d interface{}) Loom {
 func (w Loom) threadShuttle() (Loom, error) {
 	const fname = "w.threadShuttle"
 	for i := range w.Shuttle {
-		// Load stitches from channels.
+		// Load stitches from channels, skipping over any empty
+		// values untill data is reached.
 		w.Shuttle[i].next = <-w.Shuttle[i].ch
 		if w.Shuttle[i].next.Data == nil {
 			continue
 		}
-		// We need to remove all stitches from the input, between
-		// the first and values and our required starting value.
+		// We need to remove all stitches haveing lower values
+		// than our required starting point.
 		for w.Before(w.Shuttle[i].next, w.Start) {
 			w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 		}
 	}
+	// None of our threads should have nil data at this point.
 	for i := range w.Shuttle {
 		if w.Shuttle[i].next.Data == nil {
 			return w, fmt.Errorf("%s: index %d: %w",
@@ -209,18 +221,21 @@ func (w Loom) threadShuttle() (Loom, error) {
 			fmt.Println("r.next:", r.next)
 		}
 	}
-
 	return w, nil
 }
 
+// loadWarp advances the warp to the required starting value.
 func (w Loom) loadWarp() (Loom, error) {
 	const fname = "w.loadWarp"
-	w.warp.next = <-w.Shuttle[0].ch // Set up lookahead.
+	// Set up lookahead.
+	w.warp.next = <-w.Shuttle[0].ch
 	if w.warp.next.Data == nil {
 		return w, fmt.Errorf("%s: %w",
 			fname, ErrNilPointer)
 	}
 	for {
+		// Stream through the warp untill its value is greater
+		// than the starting value, values should not be nil.
 		w.warp.current = w.warp.next
 		if w.After(w.warp.next, w.Start) {
 			break
@@ -234,16 +249,22 @@ func (w Loom) loadWarp() (Loom, error) {
 	return w, nil
 }
 
-// advanceShuttle moves the shuttle forwards to the next warp.
-func (w Loom) advanceShuttle() (Loom, error) {
+// advanceToWarp pulls the shuttle threads forwards to the next warp.
+func (w Loom) advanceToWarp() (Loom, error) {
 	const fname = "advanceShuttle"
 	var err error
 	for i := range w.Shuttle {
+		// For every thread in the shuttle.
 		for !w.After(w.Shuttle[i].next, w.warp.next) {
 
+			// Whilst the next value is not greater than that
+			// of the value in the warp, pass another stitch.
 			w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
+
+			// If we get a nil value in the data, we have
+			// run out of thread, something is wrong.
 			if w.Shuttle[i].next.Data == nil {
 				err = fmt.Errorf(
 					"%s: index %d: %w",
@@ -255,6 +276,8 @@ func (w Loom) advanceShuttle() (Loom, error) {
 	return w, err
 }
 
+// weaveWarped weaves the array of stitches with predefined channels using
+// a warp or grid, the first channel is used as the warp.
 func (w Loom) weaveWarped(s []Stitch) error {
 	const fname = "weaveWarped"
 	// Load all required data from chans.
@@ -280,7 +303,7 @@ func (w Loom) weaveWarped(s []Stitch) error {
 	}
 	for w.warp.next = range warp {
 		// Spool channels into the shuttle.
-		w, err = w.advanceShuttle()
+		w, err = w.advanceToWarp()
 		if err != nil {
 			return fmt.Errorf("%s: %w", fname, err)
 		}
@@ -328,6 +351,44 @@ func (w Loom) weaveWarped(s []Stitch) error {
 	return nil
 }
 
+// advanceShuttle finds the next value to output and then all values that
+// are within the threshold from that and selects them for output,
+// loading in new stitches into the shuttle on so doing.
+func (w Loom) advanceShuttle() (Loom, error) {
+
+	const fname = "w.advanceShuttle"
+	w.warp.current = w.Shuttle[0].next
+
+	// Find the next stitch, that with the lowest value and then set
+	// the threshold from that.
+	for i := range w.Shuttle {
+		if w.Before(w.Shuttle[i].next, w.warp.current) {
+			w.warp.current = w.Shuttle[i].next
+		}
+	}
+	w.warp.next = w.Add(w.warp.current, w.Threshold)
+
+	// Set the threads that have values beneath or equal to the
+	// threshold into the output array and load the next stitch into
+	// the shuttle, set the state on the output stitches so that they
+	// can be dealt with appropriately in the stitch user function.
+	for i := range w.Shuttle {
+		if !w.After(w.Shuttle[i].next, w.warp.next) {
+			w.Output[i] = w.Shuttle[i].next
+			w.Output[i].State = Written
+			w.Shuttle[i].next = <-w.Shuttle[i].ch
+			if w.Shuttle[i].next.Data == nil {
+				return w, fmt.Errorf("%s: nil pointer", fname)
+			}
+			continue
+		}
+		w.Output[i].State = Empty
+	}
+	return w, nil
+}
+
+// weave interleaves an array of stitches along with the weaving of
+// predefined channels,
 func (w Loom) weave(s []Stitch) error {
 	const fname = "weave"
 	// Load all required data from chans.
@@ -340,26 +401,19 @@ func (w Loom) weave(s []Stitch) error {
 		return fmt.Errorf("%s: %w", fname, err)
 	}
 
-	if w.PreWeave != nil {
-		w = w.PreWeave(w, w.warp.current)
-	}
+	// Set the length of the output array to match that of the
+	// Shuttle.
+	w.Output = make([]Stitch, len(w.Shuttle))
 
 	for {
-		// Clear then fill the shuttle output.
-		w.Output = w.Output[:0]
-
-		w, err = w.advanceShuttle()
-		if err != nil {
-			return fmt.Errorf("%s: %w", fname, err)
-		}
-		for _, thrd := range w.Shuttle {
-			if w.Before(thrd.current, w.warp.next) {
-				w.Output = append(w.Output, thrd.current)
-			}
-		}
 		// User output function.
 		if w.PreStitch != nil {
 			w = w.PreStitch(w, w.warp.next)
+		}
+		// Load w.Output.
+		w, err = w.advanceShuttle()
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
