@@ -375,13 +375,13 @@ func (w Loom) advanceShuttle() (Loom, error) {
 	// the shuttle, set the state on the output stitches so that they
 	// can be dealt with appropriately in the stitch user function.
 	for i := range w.Shuttle {
+		if w.Shuttle[i].next.Data == nil {
+			return w, fmt.Errorf("%s: nil pointer", fname)
+		}
 		if !w.After(w.Shuttle[i].next, w.warp.next) {
 			w.Output[i] = w.Shuttle[i].next
 			w.Output[i].State = Written
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
-			if w.Shuttle[i].next.Data == nil {
-				return w, fmt.Errorf("%s: nil pointer", fname)
-			}
 			continue
 		}
 		w.Output[i].State = Empty
