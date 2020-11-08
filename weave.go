@@ -31,14 +31,19 @@ type State int
 
 // Stitch is the primary object with which the we interacts with our data
 // from the code that calls the package, accessible as it passes through
-// the loom by way of the above function types; The Weave factions sort
-// our streams of data encapsulating them in channels of stitches that the
-// weave functions pass though the algorithm where it is sorted by the
-// provided Comp functions.  Then into the ShuttleFunc's from where we can
-// access it by way of those functions that we have also provided.
+// the loom by way of the above function types; The Weave functions sort
+// our streams of data, encapsulating them within channels of stitches so that
+// the weave functions can pass them though the algorithm, where it is
+// then sorted by the provided Comp functions, before passing into the
+// ShuttleFunc's from where we can access it by way of those functions
+// that are also user defined.
 type Stitch struct {
+	// State is to be used to define whether the stitch is in use or
+	// not or if it has been counted, used user side.
 	State int
-	Data  interface{}
+	// Type defines the type of that which is inside the interface.
+	Type int
+	Data interface{}
 }
 
 // Loom interleave multiple streams of data.
@@ -78,6 +83,10 @@ type Loom struct {
 	// is structured if Warp is true.
 	warp warp
 
+	// Threshold defines the increment used to group together values
+	// when the warp is not set.
+	Threshold interface{}
+
 	// Output is an array into which the shuttle places the thread
 	// stitches that are ready for output.
 	Output []Stitch
@@ -86,8 +95,7 @@ type Loom struct {
 	Equal  FnComp
 	After  FnComp
 
-	Verbose   bool
-	Threshold interface{}
+	Verbose bool
 }
 
 // Shuttle contains all of the current working threads in the loom.
@@ -110,19 +118,20 @@ type thread struct {
 }
 
 // firstIndex returns the index of the first stitch in the stitches array
-// that is greater or equal to the given stitch.
+// greater or equal to the given stitch.
 func (w Loom) firstIndex(s []Stitch, n Stitch) (int, error) {
 	const fname = "firstIndex"
 	for i := range s {
 		if w.After(s[i], n) || w.Equal(s[i], n) {
 			if s[i].Data == nil {
-				return 0, fmt.Errorf(fname+
-					": at index %d: %w", i, ErrNilPointer)
+				return 0, fmt.Errorf(
+					"%s: at index %d: %w",
+					fname, i, ErrNilPointer)
 			}
 			return i, nil
 		}
 	}
-	return 0, fmt.Errorf(fname+": %w", ErrOutOfBounds)
+	return 0, fmt.Errorf("%s: %w", fname, ErrOutOfBounds)
 }
 
 // Warp returns the stitch that is currently the warp in the loom.
@@ -133,14 +142,13 @@ func (w Loom) Warp() Stitch {
 // Weave interleaves the objects in the stitch array with the channels
 // that the user also provides, if the flag for warp is set then the first
 // of these channels is used as the warp, a structure or guide for the
-// output. A channel of non regularly spaced events can be interleaved
-// with this channel of regularly spaced intervals, be they temporal or
-// other. Without the warp the channels and provided objects are
-// interleaved, the coincidence of values can be regulated by way of the
-// threshold setting, reducing slightly the exigence of the comparison
-// functions, can at times greatly decrease the size of the output without
-// harming the legibility of the data, effectively in certain cases
-// increasing it.
+// output. Channels of irregularly spaced intervals may then be interleaved
+// using the warp to provide structure, the channels maybe temporal or
+// other. Without the warp the channels and provided objects are simply
+// interleaved, the coincidence of simultaneous values is regulated by
+// way of the threshold setting, reducing or increasing the exigence of the
+// comparison functions effectively defining a resolution of the output.
+// This can at times greatly alter the size of the output.
 func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
 	const fname = "Weave"
 	// The shuttle holds all the critical data from the channels
@@ -149,11 +157,16 @@ func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
 	for i := range chans {
 		w.Shuttle[i].ch = chans[i]
 	}
-	w.WarpOn = true
-	if w.WarpOn {
+	switch {
+	case w.WarpOn:
 		err := w.weaveWarped(s)
 		if err != nil {
-			return fmt.Errorf(fname+": %w", err)
+			return fmt.Errorf("%s: %w", fname, err)
+		}
+	default:
+		err := w.weave(s)
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
 		}
 	}
 	return nil
@@ -185,8 +198,8 @@ func (w Loom) threadShuttle() (Loom, error) {
 	}
 	for i := range w.Shuttle {
 		if w.Shuttle[i].next.Data == nil {
-			return w, fmt.Errorf(
-				fname+": index %d: %w", i, ErrNilPointer)
+			return w, fmt.Errorf("%s: index %d: %w",
+				fname, i, ErrNilPointer)
 		}
 	}
 	if w.Verbose {
@@ -204,7 +217,8 @@ func (w Loom) loadWarp() (Loom, error) {
 	const fname = "w.loadWarp"
 	w.warp.next = <-w.Shuttle[0].ch // Set up lookahead.
 	if w.warp.next.Data == nil {
-		return w, fmt.Errorf(fname+": %w", ErrNilPointer)
+		return w, fmt.Errorf("%s: %w",
+			fname, ErrNilPointer)
 	}
 	for {
 		w.warp.current = w.warp.next
@@ -213,7 +227,8 @@ func (w Loom) loadWarp() (Loom, error) {
 		}
 		w.warp.next = <-w.Shuttle[0].ch
 		if w.warp.next.Data == nil {
-			return w, fmt.Errorf(fname+": %w", ErrNilPointer)
+			return w, fmt.Errorf("%s: %w",
+				fname, ErrNilPointer)
 		}
 	}
 	return w, nil
@@ -229,8 +244,9 @@ func (w Loom) advanceShuttle() (Loom, error) {
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 			if w.Shuttle[i].next.Data == nil {
-				err = fmt.Errorf(fname+
-					": index %d: %w", i, ErrNilPointer)
+				err = fmt.Errorf(
+					"%s: index %d: %w",
+					fname, i, ErrNilPointer)
 				break
 			}
 		}
@@ -243,15 +259,15 @@ func (w Loom) weaveWarped(s []Stitch) error {
 	// Load all required data from chans.
 	j, err := w.firstIndex(s, w.Start)
 	if err != nil && !errors.Is(err, ErrOutOfBounds) {
-		return fmt.Errorf(fname+": %w", err)
+		return fmt.Errorf("%s: %w", fname, err)
 	}
 	w, err = w.threadShuttle()
 	if err != nil {
-		return fmt.Errorf(fname+": %w", err)
+		return fmt.Errorf("%s: %w", fname, err)
 	}
 	w, err = w.loadWarp()
 	if err != nil {
-		return fmt.Errorf(fname+": %w", err)
+		return fmt.Errorf("%s: %w", fname, err)
 	}
 	// Extract warp, the first channel that is passed into weave is
 	// extracted and used as a guide or the warp for the looms output.
@@ -265,7 +281,7 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		// Spool channels into the shuttle.
 		w, err = w.advanceShuttle()
 		if err != nil {
-			return fmt.Errorf(fname+": %w", err)
+			return fmt.Errorf("%s: %w", fname, err)
 		}
 		// Clear then fill the shuttle output.
 		w.Output = w.Output[:0]
@@ -285,8 +301,74 @@ func (w Loom) weaveWarped(s []Stitch) error {
 				break
 			}
 			if s[j].Data == nil {
-				return fmt.Errorf(fname+
-					": stitches: %w", ErrNilPointer)
+				return fmt.Errorf("%s: stitches: %w",
+					fname, ErrNilPointer)
+			}
+			// User output function.
+			if w.Stitch != nil {
+				w = w.Stitch(w, s[j])
+			}
+		}
+		// User output function.
+		if w.PostStitch != nil {
+			w = w.PostStitch(w, w.warp.current)
+		}
+		// Check out if required.
+		if w.After(w.warp.next, w.End) {
+			break
+		}
+		// Prepare for the next row.
+		w.warp.current = w.warp.next
+	}
+	// User output function.
+	if w.PostWeave != nil {
+		w = w.PostWeave(w, w.warp.current)
+	}
+	return nil
+}
+
+func (w Loom) weave(s []Stitch) error {
+	const fname = "weave"
+	// Load all required data from chans.
+	j, err := w.firstIndex(s, w.Start)
+	if err != nil && !errors.Is(err, ErrOutOfBounds) {
+		return fmt.Errorf("%s: %w", fname, err)
+	}
+	w, err = w.threadShuttle()
+	if err != nil {
+		return fmt.Errorf("%s: %w", fname, err)
+	}
+
+	if w.PreWeave != nil {
+		w = w.PreWeave(w, w.warp.current)
+	}
+
+	for {
+		// Spool channels into the shuttle.
+		w, err = w.advanceShuttle()
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
+		}
+		// Clear then fill the shuttle output.
+		w.Output = w.Output[:0]
+		for _, thrd := range w.Shuttle {
+			if w.Before(thrd.current, thrd.current) {
+				w.Output = append(w.Output, thrd.current)
+			}
+		}
+		// User output function.
+		if w.PreStitch != nil {
+			w = w.PreStitch(w, w.warp.next)
+		}
+		// Stitches.
+		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
+			// Omit Events that are too recent.
+			if w.After(s[j], w.End) {
+				break
+			}
+			if s[j].Data == nil {
+				return fmt.Errorf("%s: stitches: %w",
+					fname, ErrNilPointer)
 			}
 			// User output function.
 			if w.Stitch != nil {
