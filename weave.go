@@ -100,6 +100,9 @@ type Loom struct {
 	// Output is an array into which the shuttle places the thread
 	// stitches that are ready for output.
 	Output []Stitch
+	// stage is a holding space for delaying or offsetting the output
+	// by one itteration.
+	stage []Stitch
 	Shuttle
 	Before FnComp
 	Equal  FnComp
@@ -125,8 +128,8 @@ type warp struct {
 // thread holds each stitch and its state inside of the shuttle one for
 // every channel that is passed into the loom.
 type thread struct {
-	ch      chan Stitch
-	prev    Stitch
+	ch chan Stitch
+	//prev    Stitch
 	current Stitch
 	next    Stitch
 }
@@ -206,7 +209,7 @@ func (w Loom) setShuttle() (Loom, error) {
 		// We need to remove all stitches haveing lower values
 		// than our required starting point.
 		for w.Before(w.Shuttle[i].next, w.Start) {
-			w.Shuttle[i].prev = w.Shuttle[i].current
+			//w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 		}
@@ -220,7 +223,7 @@ func (w Loom) setShuttle() (Loom, error) {
 	}
 	if w.Verbose {
 		for _, r := range w.Shuttle {
-			fmt.Println("r.prev:", r.prev)
+			//fmt.Println("r.prev:", r.prev)
 			fmt.Println("r.current:", r.current)
 			fmt.Println("r.next:", r.next)
 		}
@@ -261,14 +264,11 @@ func (w Loom) threadShuttelAndWarp() (Loom, error) {
 	for i := range w.Shuttle {
 		// For every thread in the shuttle.
 		for !w.After(w.Shuttle[i].next, w.warp.next) {
-
-			// Whilst the next value is no greater than that
-			// of the value within the warp, pass another
-			// stitch.
-			w.Shuttle[i].prev = w.Shuttle[i].current
+			// Whilst the next value is not greater than that
+			// of the value of the warp, pass another stitch.
+			//w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
-
 			// If we get a nil value in the data, we have
 			// run out of thread, something is wrong.
 			if w.Shuttle[i].next.Data == nil {
@@ -279,13 +279,15 @@ func (w Loom) threadShuttelAndWarp() (Loom, error) {
 			}
 		}
 	}
-
-	// Clear then fill the output.
-	w.Output = w.Output[:0]
-	for _, thrd := range w.Shuttle {
-		if w.Before(thrd.current, w.warp.next) {
-			w.Output = append(w.Output, thrd.current)
+	// Load output and then fill the next stage.
+	for i, thrd := range w.Shuttle {
+		if w.Before(thrd.current, w.warp.current) {
+			w.Output[i] = thrd.current
+			w.Output[i].State = Fresh
+			// w.Output = append(w.Output, thrd.current)
+			continue
 		}
+		w.Output[i].State = Stale
 	}
 	return w, err
 }
@@ -311,6 +313,14 @@ func (w Loom) weaveWarped(s []Stitch) error {
 	// extracted and used as a guide or the warp for the looms output.
 	warp := w.Shuttle[0].ch
 	w.Shuttle = w.Shuttle[1:]
+	// Set the length of the output array to match that of the
+	// Shuttle.
+	w.Output = make([]Stitch, len(w.Shuttle))
+
+	w, err = w.threadShuttelAndWarp()
+	if err != nil {
+		return fmt.Errorf("%s: %w", fname, err)
+	}
 	// User output function.
 	if w.PreWeave != nil {
 		w = w.PreWeave(w, w.warp.current)
@@ -323,7 +333,7 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		}
 		// User output function.
 		if w.PreStitch != nil {
-			w = w.PreStitch(w, w.warp.next)
+			w = w.PreStitch(w, w.warp.current)
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
@@ -376,6 +386,9 @@ func (w Loom) threadShuttle() (Loom, error) {
 	}
 	w.warp.next = w.Add(least, w.Threshold)
 
+	// Transfer over the previous itterations data.
+	copy(w.Output, w.stage)
+
 	// Set threads that have values lesser or equal to that of the
 	// threshold into the output array and then load the next stitch
 	// into the shuttle; Set the state of the newly output stitches to
@@ -385,13 +398,13 @@ func (w Loom) threadShuttle() (Loom, error) {
 			return w, fmt.Errorf("%s: nil pointer", fname)
 		}
 		if !w.After(w.Shuttle[i].next, w.warp.next) {
-			w.Output[i] = w.Shuttle[i].next
-			w.Output[i].State = Fresh
+			w.stage[i] = w.Shuttle[i].next
+			w.stage[i].State = Fresh
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 			continue
 		}
-		w.Output[i] = w.Shuttle[i].next
-		w.Output[i].State = Stale
+		w.stage[i] = w.Shuttle[i].next
+		w.stage[i].State = Stale
 	}
 	return w, nil
 }
@@ -412,18 +425,18 @@ func (w Loom) weave(s []Stitch) error {
 	// Set the length of the output array to match that of the
 	// Shuttle.
 	w.Output = make([]Stitch, len(w.Shuttle))
+	w.stage = make([]Stitch, len(w.Shuttle))
 
 	firstRun := true   // Inhibit reading on the first pass.
 	breakNext := false // Allow the last line to be displayed.
 	for {
-		// Load w.Output.
 		w, err = w.threadShuttle()
 		if err != nil {
 			return fmt.Errorf("%s: %w", fname, err)
 		}
 		// User output function.
 		if w.PreStitch != nil && !firstRun {
-			w = w.PreStitch(w, w.warp.next)
+			w = w.PreStitch(w, w.warp.current)
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
