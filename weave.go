@@ -389,10 +389,18 @@ func (w Loom) threadShuttle() (Loom, error) {
 	n := 0
 	for i := range w.Shuttle {
 		if w.Before(w.Shuttle[i].next, least) {
+			least = w.Shuttle[i].next
 			n = i
 		}
 	}
+	// Set the next warp value for output and eventually keeping track
+	// of the current values required for output to used functions.
 	w.warp.next = w.Shuttle[n].next
+
+	// Advance least for the threshold if required.
+	if w.Threshold != nil {
+		least = w.Add(least, w.Threshold)
+	}
 
 	// Transfer over the previous itterations data.
 	copy(w.Output, w.stage)
@@ -405,8 +413,7 @@ func (w Loom) threadShuttle() (Loom, error) {
 		if w.Shuttle[i].next.Data == nil {
 			return w, fmt.Errorf("%s: nil pointer", fname)
 		}
-		//if !w.After(w.Shuttle[i].next, least) {
-		if i == n {
+		if !w.After(w.Shuttle[i].next, least) {
 			w.stage[i] = w.Shuttle[i].next
 			w.stage[i].State = Fresh
 			w.Shuttle[i].current = w.Shuttle[i].next
