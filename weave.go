@@ -398,7 +398,7 @@ func (w Loom) threadShuttle() (Loom, error) {
 	w.warp.next = w.Shuttle[n].next
 
 	// Advance least for the threshold if required.
-	if w.Threshold != nil {
+	if w.Add != nil {
 		least = w.Add(least, w.Threshold)
 	}
 
