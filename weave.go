@@ -480,7 +480,7 @@ func (w Loom) weave(s []Stitch) error {
 			}
 		}
 		// User output function.
-		if w.PostStitch != nil {
+		if w.PostStitch != nil && !firstRun {
 			w = w.PostStitch(w, w.warp.current)
 		}
 		// Check out if required.
