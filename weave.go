@@ -151,7 +151,7 @@ func (w Loom) firstIndex(s []Stitch, n Stitch) (int, error) {
 	return 0, fmt.Errorf("%s: %w", fname, ErrOutOfBounds)
 }
 
-// Warp returns the stitch that is currently the warp in the loom.
+// Warp returns the stitch that is currently in the warp of the loom.
 func (w Loom) Warp() Stitch {
 	return w.warp.current
 }
@@ -384,8 +384,8 @@ func (w Loom) threadShuttle() (Loom, error) {
 	least := w.Shuttle[0].next
 	w.warp.next = w.Shuttle[0].next
 
-	// Find the stitch with the lowest value and then set the
-	// threshold from that.
+	// Find the stitch with the lowest value we will use this to set
+	// the next warp.
 	n := 0
 	for i := range w.Shuttle {
 		if w.Before(w.Shuttle[i].next, least) {
@@ -393,22 +393,26 @@ func (w Loom) threadShuttle() (Loom, error) {
 			n = i
 		}
 	}
-	// Set the next warp value for output and eventually keeping track
-	// of the current values required for output to used functions.
+	// Set the warp next value for use in output and eventually
+	// keeping track of the current values required for output to used
+	// functions.
 	w.warp.next = w.Shuttle[n].next
 
-	// Advance least for the threshold if required.
+	// Advance least to generate a threshold, if required.
 	if w.Add != nil {
 		least = w.Add(least, w.Threshold)
 	}
 
-	// Transfer over the previous itterations data.
+	// Transfer over the previous itterations data, this offset of one
+	// itteration is required to offset the output of the bhukti to
+	// the correct date.
 	copy(w.Output, w.stage)
 
-	// Set threads that have values lesser or equal to that of the
-	// threshold into the output array and then load the next stitch
+	// Set threads that have values lower or equal to that of the
+	// threshold in the output array and then load the next stitch
 	// into the shuttle; Set the state of the newly output stitches to
-	// Fresh and those that have not been updated to Stale.
+	// Fresh and those that have not been updated to Stale; This may
+	// be required in the user functions.
 	for i := range w.Shuttle {
 		if w.Shuttle[i].next.Data == nil {
 			return w, fmt.Errorf("%s: nil pointer", fname)
