@@ -170,7 +170,7 @@ func (w Loom) Warp() Stitch {
 // comparison functions effectively defining a resolution of the output.
 // This can at times greatly alter the size of the output.
 func (w Loom) Weave(s []Stitch, chans ...chan Stitch) error {
-	const fname = "Weave"
+	const fname = "Loom.Weave"
 	// The shuttle holds all the critical data from the channels
 	// whilst the subroutines of the algorithm are functioning.
 	w.Shuttle = make([]thread, len(chans))
@@ -301,7 +301,7 @@ func (w Loom) threadShuttelAndWarp() (Loom, error) {
 // weaveWarped weaves the array of stitches with predefined channels using
 // a warp or grid, the first channel is used as the warp.
 func (w Loom) weaveWarped(s []Stitch) error {
-	const fname = "weaveWarped"
+	const fname = "Loom.weaveWarped"
 	// Load all required data from chans.
 	j, err := w.firstIndex(s, w.Start)
 	if err != nil && !errors.Is(err, ErrOutOfBounds) {
@@ -448,7 +448,7 @@ func (w Loom) threadShuttle() (Loom, error) {
 // weave interleaves an array of stitches along with the weaving of
 // predefined channels,
 func (w Loom) weave(s []Stitch) error {
-	const fname = "weave"
+	const fname = "Loom.weave"
 	// Load all required data from chans.
 	j, err := w.firstIndex(s, w.Start)
 	if err != nil && !errors.Is(err, ErrOutOfBounds) {
