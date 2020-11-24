@@ -132,8 +132,7 @@ type warp struct {
 // thread holds each stitch and its state inside of the shuttle one for
 // every channel that is passed into the loom.
 type thread struct {
-	ch chan Stitch
-	//prev    Stitch
+	ch      chan Stitch
 	current Stitch
 	next    Stitch
 }
@@ -213,7 +212,6 @@ func (w Loom) setShuttle() (Loom, error) {
 		// We need to remove all stitches haveing lower values
 		// than our required starting point.
 		for w.Before(w.Shuttle[i].next, w.Start) {
-			//w.Shuttle[i].prev = w.Shuttle[i].current
 			w.Shuttle[i].current = w.Shuttle[i].next
 			w.Shuttle[i].next = <-w.Shuttle[i].ch
 		}
@@ -227,7 +225,6 @@ func (w Loom) setShuttle() (Loom, error) {
 	}
 	if w.Verbose {
 		for _, r := range w.Shuttle {
-			//fmt.Println("r.prev:", r.prev)
 			fmt.Println("r.current:", r.current)
 			fmt.Println("r.next:", r.next)
 		}
@@ -271,7 +268,6 @@ func (w Loom) threadShuttelAndWarp() (Loom, error) {
 		for !w.After(w.Shuttle[i].next, w.warp.next) {
 			// Whilst the next value is not greater than that
 			// of the value of the warp, pass another stitch.
-			//w.Shuttle[i].prev = w.Shuttle[i].current
 			if !once {
 				w.Shuttle[i].current = w.Shuttle[i].next
 				once = true
