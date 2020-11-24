@@ -35,7 +35,11 @@ type FnShuttle func(Loom, Stitch) (Loom, error)
 type State int
 
 const (
+	// Stale indicates that the data is not new, there is no state
+	// other than that of being stale.
 	Stale State = 0
+	// Fresh indicates that there is new data and contains a bitfield
+	// for holding state.
 	Fresh State = 1 << iota
 )
 
@@ -56,32 +60,32 @@ type Stitch struct {
 	Data  interface{}
 }
 
-// Loom interleave multiple streams of data.
+// Loom is essentially an abstract data type, its function is to receive
+// and sort multiple incoming streams of data by a criteria defined by
+// user function, each stitch in the stream of data must arrive in an
+// incremental order, the job of the loom is to interleave multiple
+// consecutive streams of data, here known as threads, ordering them
+// sequentially by way of the Shuttle and its user provided functions.
 type Loom struct {
-	// The loom is essentially an abstract data type, its function is
-	// to receive and sort multiple incoming streams of data by a
-	// criteria defined by user function, each stitch in the stream of
-	// data must arrive in an incremental order, the job of the loom
-	// is to interleave multiple consecutive streams of data, here
-	// known as threads, ordering them sequentially by way of the
-	// Shuttle and its user provided functions.
-	Start Stitch // Start indicates the first stitch of a weave.
-	End   Stitch // End indicates the last stitch of a weave.
+	// Start indicates the first stitch of a weave.
+	Start Stitch
+	// End indicates the last stitch of a weave.
+	End Stitch
 
 	// User data accessible by the shuttle functions during the weave.
 	UserData interface{}
 
 	// User Functions.
 
-	// Called before the algorithm starts.
+	// PreWeave is called before the algorithm starts.
 	PreWeave FnShuttle
-	// Called before the stitch function.
+	// PreStitch is called before the stitch function.
 	PreStitch FnShuttle
-	// Performed on the users data that is fed into the loom.
+	// Stitch is the central function of the algorithm.
 	Stitch FnShuttle
-	// Called after the stitch function.
+	// PostStitch is alled after the stitch function.
 	PostStitch FnShuttle
-	// Called after the weave algorithm.
+	// PostWeave is called after the weave algorithm.
 	PostWeave FnShuttle
 
 	// WarpOn signals that the first channel is a warp and that warp
