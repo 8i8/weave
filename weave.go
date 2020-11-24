@@ -101,13 +101,17 @@ type Loom struct {
 	// stitches that are ready for output.
 	Output []Stitch
 	// stage is a holding space for delaying or offsetting the output
-	// by one itteration.
+	// by one iteration.
 	stage []Stitch
 	Shuttle
+	// After is a function used to compare two stitches.
 	Before FnComp
-	Equal  FnComp
-	After  FnComp
-	Add    FnAdd
+	// After is a function used to compare two stitches.
+	Equal FnComp
+	// After is a function used to compare two stitches.
+	After FnComp
+	// Add is the function used to addition two stitches.
+	Add FnAdd
 
 	// Level sets the level of message that are to be output.
 	Level int
