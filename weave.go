@@ -28,7 +28,7 @@ type FnAdd func(Stitch, interface{}) Stitch
 // loop of the loom function they are run by the loom whilst it is
 // generating its output to order stitches as the shuttle advances with
 // each pick of the loom.
-type FnShuttle func(Loom, Stitch) Loom
+type FnShuttle func(Loom, Stitch) (Loom, error)
 
 // State records the state of a thread within a Stitch, used within the
 // loom to mark stitches for writing, or other.
@@ -330,7 +330,10 @@ func (w Loom) weaveWarped(s []Stitch) error {
 
 	// User output function.
 	if w.PreWeave != nil {
-		w = w.PreWeave(w, w.warp.current)
+		w, err = w.PreWeave(w, w.warp.current)
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
+		}
 	}
 	for w.warp.next = range warp {
 		// Spool channels into the shuttle.
@@ -340,7 +343,10 @@ func (w Loom) weaveWarped(s []Stitch) error {
 		}
 		// User output function.
 		if w.PreStitch != nil {
-			w = w.PreStitch(w, w.warp.current)
+			w, err = w.PreStitch(w, w.warp.current)
+			if err != nil {
+				return fmt.Errorf("%s: %w", fname, err)
+			}
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
@@ -354,12 +360,18 @@ func (w Loom) weaveWarped(s []Stitch) error {
 			}
 			// User output function.
 			if w.Stitch != nil {
-				w = w.Stitch(w, s[j])
+				w, err = w.Stitch(w, s[j])
+				if err != nil {
+					return fmt.Errorf("%s: %w", fname, err)
+				}
 			}
 		}
 		// User output function.
 		if w.PostStitch != nil {
-			w = w.PostStitch(w, w.warp.current)
+			w, err = w.PostStitch(w, w.warp.current)
+			if err != nil {
+				return fmt.Errorf("%s: %w", fname, err)
+			}
 		}
 		// Check out if required.
 		if w.After(w.warp.current, w.End) {
@@ -370,7 +382,10 @@ func (w Loom) weaveWarped(s []Stitch) error {
 	}
 	// User output function.
 	if w.PostWeave != nil {
-		w = w.PostWeave(w, w.warp.current)
+		w, err = w.PostWeave(w, w.warp.current)
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
+		}
 	}
 	return nil
 }
@@ -448,12 +463,21 @@ func (w Loom) weave(s []Stitch) error {
 	w.Output = make([]Stitch, len(w.Shuttle))
 	w.stage = make([]Stitch, len(w.Shuttle))
 
-	firstRun := true   // Inhibit reading on the first pass.
+	//firstRun := true   // Inhibit reading on the first pass.
 	breakNext := false // Allow the last line to be displayed.
+
+	w, err = w.threadShuttle()
+	if err != nil {
+		return fmt.Errorf("%s: %w", fname, err)
+	}
+	w.warp.current = w.warp.next
 
 	// User output function.
 	if w.PreWeave != nil {
-		w = w.PreWeave(w, w.warp.current)
+		w, err = w.PreWeave(w, w.warp.current)
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
+		}
 	}
 	for {
 		w, err = w.threadShuttle()
@@ -461,8 +485,11 @@ func (w Loom) weave(s []Stitch) error {
 			return fmt.Errorf("%s: %w", fname, err)
 		}
 		// User output function.
-		if w.PreStitch != nil && !firstRun {
-			w = w.PreStitch(w, w.warp.current)
+		if w.PreStitch != nil {
+			w, err = w.PreStitch(w, w.warp.current)
+			if err != nil {
+				return fmt.Errorf("%s: %w", fname, err)
+			}
 		}
 		// Stitches.
 		for ; j < len(s) && w.Before(s[j], w.warp.next); j++ {
@@ -476,12 +503,18 @@ func (w Loom) weave(s []Stitch) error {
 			}
 			// User output function.
 			if w.Stitch != nil {
-				w = w.Stitch(w, s[j])
+				w, err = w.Stitch(w, s[j])
+				if err != nil {
+					return fmt.Errorf("%s: %w", fname, err)
+				}
 			}
 		}
 		// User output function.
-		if w.PostStitch != nil && !firstRun {
-			w = w.PostStitch(w, w.warp.current)
+		if w.PostStitch != nil {
+			w, err = w.PostStitch(w, w.warp.current)
+			if err != nil {
+				return fmt.Errorf("%s: %w", fname, err)
+			}
 		}
 		// Check out if required.
 		if breakNext {
@@ -492,11 +525,13 @@ func (w Loom) weave(s []Stitch) error {
 		if w.After(w.warp.current, w.End) {
 			breakNext = true
 		}
-		firstRun = false
 	}
 	// User output function.
 	if w.PostWeave != nil {
-		w = w.PostWeave(w, w.warp.current)
+		w, err = w.PostWeave(w, w.warp.current)
+		if err != nil {
+			return fmt.Errorf("%s: %w", fname, err)
+		}
 	}
 	return nil
 }
