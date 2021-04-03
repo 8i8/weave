@@ -47,7 +47,7 @@ const (
 // from the code that calls the package, accessible as it passes through
 // the loom by way of the above function types; The Weave functions sort
 // our streams of data, encapsulating them within channels of stitches so that
-// the weave functions can pass them though the algorithm, where it is
+// the weave functions can pass them through the algorithm, where it is
 // then sorted by the provided Comp functions, before passing into the
 // ShuttleFunc's from where we can access it by way of those functions
 // that are also user defined.
@@ -107,6 +107,7 @@ type Loom struct {
 	// stage is a holding space for delaying or offsetting the output
 	// by one iteration.
 	stage []Stitch
+	// shuttle contains the looms threads.
 	shuttle
 	// After is a function used to compare two stitches.
 	Before FnComp
