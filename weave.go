@@ -117,11 +117,6 @@ type Loom struct {
 	After FnComp
 	// Add is the function used to addition two stitches.
 	Add FnAdd
-
-	// Level sets the level of message that are to be output.
-	Level int
-
-	Verbose bool
 }
 
 // shuttle contains all of the current working threads in the loom.
@@ -226,12 +221,6 @@ func (l Loom) setShuttle() (Loom, error) {
 		if l.shuttle[i].next.Data == nil {
 			return l, fmt.Errorf("%s: index %d: %w",
 				fname, i, ErrNilPointer)
-		}
-	}
-	if l.Verbose {
-		for _, r := range l.shuttle {
-			fmt.Println("r.current:", r.current)
-			fmt.Println("r.next:", r.next)
 		}
 	}
 	return l, nil
