@@ -143,9 +143,9 @@ type thread struct {
 }
 
 // firstIndex returns the index of the first stitch in the stitches array
-// greater or equal to the given stitch.
+// greater than or equal to the given stitch.
 func (w Loom) firstIndex(s []Stitch, n Stitch) (int, error) {
-	const fname = "firstIndex"
+	const fname = "Loom.firstIndex"
 	for i := range s {
 		if w.After(s[i], n) || w.Equal(s[i], n) {
 			if s[i].Data == nil {
@@ -206,7 +206,7 @@ func (w Loom) LoadData(d interface{}) Loom {
 
 // setShuttle advances all threaded channels to the weave starting point.
 func (w Loom) setShuttle() (Loom, error) {
-	const fname = "w.setShuttle"
+	const fname = "Loom.setShuttle"
 	for i := range w.shuttle {
 		// Load stitches from channels, skipping over any empty
 		// values untill data is reached.
@@ -239,7 +239,7 @@ func (w Loom) setShuttle() (Loom, error) {
 
 // loadWarp advances the warp to the required starting value.
 func (w Loom) loadWarp() (Loom, error) {
-	const fname = "w.loadWarp"
+	const fname = "Loom.loadWarp"
 	// Set up lookahead.
 	w.warp.next = <-w.shuttle[0].ch
 	if w.warp.next.Data == nil {
@@ -265,7 +265,7 @@ func (w Loom) loadWarp() (Loom, error) {
 // threadShuttelAndWarp pulls the shuttle threads forwards to the next
 // warp.
 func (w Loom) threadShuttelAndWarp() (Loom, error) {
-	const fname = "threadShuttelAndWarp"
+	const fname = "Loom.threadShuttelAndWarp"
 	var err error
 	for i := range w.shuttle {
 		// For every thread in the shuttle.
@@ -400,7 +400,7 @@ func (w Loom) weaveWarped(s []Stitch) error {
 // loading in new stitches into the shuttle on so doing.
 func (w Loom) threadShuttle() (Loom, error) {
 
-	const fname = "w.advanceShuttle"
+	const fname = "Loom.threadShuttle"
 	least := w.shuttle[0].next
 	w.warp.next = w.shuttle[0].next
 
