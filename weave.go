@@ -397,6 +397,9 @@ func (l Loom) threadShuttle() (Loom, error) {
 	// the next warp.
 	n := 0
 	for i := range l.shuttle {
+		if l.shuttle[i].next.Data == nil {
+			continue
+		}
 		if l.Before(l.shuttle[i].next, least) {
 			least = l.shuttle[i].next
 			n = i
@@ -424,7 +427,7 @@ func (l Loom) threadShuttle() (Loom, error) {
 	// be required in the user functions.
 	for i := range l.shuttle {
 		if l.shuttle[i].next.Data == nil {
-			return l, fmt.Errorf("%s: nil pointer", fname)
+			continue
 		}
 		if !l.After(l.shuttle[i].next, least) {
 			l.stage[i] = l.shuttle[i].next
